@@ -5,6 +5,8 @@
 ```bash
 uv sync                 # core deps -- what you need to run the test suite
 uv sync --group eval    # + fastembed/datasets, only needed for evals/dbpedia
+cp .env.example .env    # only needed to run `uv run lulu` against a real model --
+                         # the test suite mocks the SDK, no key required
 ```
 
 ## Running things
