@@ -1,0 +1,38 @@
+[tool.uv.workspace]
+members = ["packages/*"]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0",
+    "ruff>=0.15.0",
+]
+# Only needed for evals/dbpedia/run.py -- kept separate so `uv sync`
+# (what CI and every contributor runs to test) doesn't pull ~200MB of
+# fastembed/onnxruntime/datasets/pyarrow just to run the unit suite.
+# Get it with: uv sync --group eval
+eval = [
+    "fastembed>=0.5.0",
+    "datasets>=2.19.0",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+# Pinned explicitly (not left to ruff's version-dependent default) so a
+# future ruff upgrade can't silently start failing CI with newly-enabled
+# rules -- E4/E7/E9 (pycodestyle error subset) + F (pyflakes) is what this
+# project actually wants enforced today.
+select = ["E4", "E7", "E9", "F"]
+
+[tool.pytest.ini_options]
+# Both lulu-router/tests and lulu-core/tests are packages literally named
+# "tests" (each has its own __init__.py, needed for their internal
+# relative imports). Running pytest across the whole workspace at once
+# collides the two under the same sys.modules key unless collection uses
+# importlib's per-file qualified names instead of inserting rootdirs into
+# sys.path. Paired with relative imports inside each tests/ package (not
+# `from tests.x import y`, which re-introduces the same collision).
+addopts = "--import-mode=importlib"
+testpaths = ["packages"]

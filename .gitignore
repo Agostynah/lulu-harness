@@ -1,0 +1,38 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+.ruff_cache/
+uv.lock.tmp
+
+# Node (apps/inspector)
+node_modules/
+dist/
+.vite/
+
+# Runtime data / logs (regenerable, and the dataset stays local by default)
+.lulu/logs/
+.lulu/data/
+.lulu/locks/
+**/data/*.db
+**/data/*.db-wal
+**/data/*.db-shm
+**/data/*.idmap.json
+
+# FastEmbed / ONNX model cache
+.fastembed_cache/
+models/
+
+# eval corpus/embedding cache (regenerable, and can be large)
+evals/**/.cache/
+
+# Secrets
+.env
+*.key
+
+# Personal planning notes -- never meant for the public repo, unlike
+# docs/THESIS.md's Roadmap section which IS meant to be public.
+decisions_todo.md
