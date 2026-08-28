@@ -49,6 +49,13 @@ docs/THESIS.md          the actual argument this project is making, and its fals
   Blast-radius and lock-conflict detection both escalate to `ASK`
   regardless of the active `AttentionMode`, including `AUTO`. If you add
   a new cross-cutting check like those, it should follow the same rule.
+- **Cross-platform assumptions get checked, not assumed.** CI runs the
+  full suite on Linux, macOS, and Windows because this project has already
+  shipped two OS-specific bugs caught exactly that way (Windows silently
+  corrupting line endings on every file edit; POSIX treating backslash as
+  an ordinary filename character, letting a traversal string through that
+  Windows correctly rejected). If you're touching path handling, don't
+  assume your local OS's behavior is universal -- it probably isn't.
 
 A CI workflow leaves an automatic comment on any PR touching the files
 listed above, as a checklist reminder -- not a blocker, just a nudge.
