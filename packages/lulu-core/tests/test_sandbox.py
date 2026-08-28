@@ -6,6 +6,7 @@ confused tool call."
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 import pytest
@@ -88,9 +89,23 @@ def test_mixed_separator_traversal_is_blocked(root: Path):
         resolve_within_root(root, "src/..\\../secret.txt")
 
 
-def test_absolute_windows_system_path_is_blocked(root: Path):
-    with pytest.raises(PathEscapesRootError):
-        resolve_within_root(root, "C:\\Windows\\System32\\config\\SAM")
+def test_absolute_windows_system_path_is_blocked_or_harmlessly_contained(root: Path):
+    """On Windows, a drive-letter path is genuinely absolute and points
+    at a real system location outside root -- must be rejected. On
+    POSIX, "C:\\Windows\\..." isn't an absolute path at all (there's no
+    such thing as a drive letter), so pathlib correctly treats it as a
+    relative, backslash-containing filename, which resolve_within_root
+    then normalizes and resolves *underneath* root -- safely contained,
+    not rejected, because it was never actually able to reach outside
+    root in the first place. Same function, same guarantee (never leaves
+    root), different observable outcome because the input string means
+    something different on each platform."""
+    if os.name == "nt":
+        with pytest.raises(PathEscapesRootError):
+            resolve_within_root(root, "C:\\Windows\\System32\\config\\SAM")
+    else:
+        resolved = resolve_within_root(root, "C:\\Windows\\System32\\config\\SAM")
+        assert is_within_root(root, resolved)
 
 
 def test_trailing_slash_within_root_is_allowed(root: Path):

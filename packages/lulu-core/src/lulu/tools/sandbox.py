@@ -47,9 +47,20 @@ def resolve_within_root(root: Path, user_path: str) -> Path:
     collapses all of that to a single canonical absolute path first, and
     only then is containment checked -- there's no clever input that
     survives resolution and still lands outside root.
+
+    Backslashes are normalized to forward slashes before anything else,
+    on every platform, not just Windows. Caught by CI, not assumed:
+    `pathlib.PosixPath` treats a backslash as an ordinary filename
+    character with no separator meaning at all, so `"..\\..\\secret.txt"` run through
+    this function on Linux was silently resolving to a harmless (if
+    oddly-named) file *inside* root instead of being rejected -- a
+    traversal attempt that only got blocked by accident of which OS
+    happened to be running the harness. The string a model emits doesn't
+    know or care what OS it'll run on; the sandboxing shouldn't either.
     """
     root = root.resolve()
-    candidate = Path(user_path)
+    normalized = user_path.replace("\\", "/")
+    candidate = Path(normalized)
     resolved = candidate.resolve() if candidate.is_absolute() else (root / candidate).resolve()
 
     if not is_within_root(root, resolved):
