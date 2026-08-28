@@ -9,10 +9,14 @@ dependencies = [
     "mcp>=1.0.0",
     "openai>=1.50.0",
     "fastembed>=0.5.0",
+    "fastapi>=0.115.0",
+    "uvicorn>=0.30.0",
+    "sse-starlette>=2.1.0",
 ]
 
 [project.scripts]
 lulu = "lulu.cli:main"
+lulu-server = "lulu.server:run"
 
 [tool.uv.sources]
 lulu-router = { workspace = true }
