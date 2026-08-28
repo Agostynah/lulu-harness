@@ -13,13 +13,13 @@ from lulu.llm.client import Message, ModelResponse, ToolSpec, Usage
 @dataclass
 class FakeModelClient:
     responses: list[ModelResponse] = field(default_factory=list)
-    calls: list[tuple[list[Message], list[ToolSpec]]] = field(default_factory=list)
+    calls: list[tuple[list[Message], list[ToolSpec], str]] = field(default_factory=list)
 
     def queue(self, response: ModelResponse) -> None:
         self.responses.append(response)
 
     def complete(self, messages: list[Message], tools: list[ToolSpec], system: str = "") -> ModelResponse:
-        self.calls.append((list(messages), list(tools)))
+        self.calls.append((list(messages), list(tools), system))
         if not self.responses:
             raise AssertionError("FakeModelClient.complete() called with no queued response left")
         return self.responses.pop(0)

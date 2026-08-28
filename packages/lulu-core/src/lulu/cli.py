@@ -18,12 +18,14 @@ import sys
 from pathlib import Path
 
 from lulu.attention import AttentionMode
+from lulu.commands.render import render_cost, render_trace
 from lulu.config import VALID_PROVIDERS, LuluConfig, load_config
 from lulu.llm.anthropic_client import AnthropicClient
 from lulu.llm.client import Message, ModelClient
 from lulu.llm.ollama_client import OllamaClient
 from lulu.llm.openrouter_client import OpenRouterClient
 from lulu.loop import AgentLoop
+from lulu.memory import MemoryStore
 from lulu.permissions import PermissionChecker
 from lulu.session import Session
 from lulu.tools.bash_tool import make_bash_tool
@@ -35,6 +37,7 @@ from lulu.tools.file_tools import (
     make_write_file_tool,
 )
 from lulu.tools.registry import ToolRegistry
+from lulu_router.trace import RoutingTrace
 
 SYSTEM_PROMPT = (
     "You are Lulu, an agentic coding assistant. You have file and shell "
@@ -74,12 +77,14 @@ def terminal_ask_human(tool_name: str, arguments: dict, reason: str) -> bool:
     return answer == "y"
 
 
-def _run_one_turn(loop: AgentLoop, session: Session, history: list[Message], user_input: str) -> list[Message]:
+def _run_one_turn(
+    loop: AgentLoop, session: Session, history: list[Message], user_input: str
+) -> tuple[list[Message], RoutingTrace | None]:
     messages_before = len(history)
     result = loop.run_turn(history, user_input)
     session.append_turn_result(result, messages_before)
     print(result.messages[-1].content)
-    return result.messages
+    return result.messages, result.trace
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -99,10 +104,20 @@ def build_parser() -> argparse.ArgumentParser:
         help="Override lulu.toml's model.provider for this run",
     )
     parser.add_argument("--session", default=None, help="Resume an existing session id")
+    parser.add_argument(
+        "--scope",
+        default=None,
+        help="Identity this run is scoped to -- memory it writes/reads is boundaried "
+        "to this scope (see Shard.permits in lulu_router). Omit for unscoped/personal use.",
+    )
     return parser
 
 
-def main(argv: list[str] | None = None, model_override: ModelClient | None = None) -> int:
+def main(
+    argv: list[str] | None = None,
+    model_override: ModelClient | None = None,
+    memory_override: MemoryStore | None = None,
+) -> int:
     args = build_parser().parse_args(argv)
 
     root = Path(args.root).resolve()
@@ -124,6 +139,7 @@ def main(argv: list[str] | None = None, model_override: ModelClient | None = Non
     history = session.load_history()
 
     model = model_override or build_model_client(config)
+    memory = memory_override or MemoryStore()
     tools = build_tool_registry(root, locks_dir=locks_dir, session_id=session.session_id)
     permissions = PermissionChecker(
         mode=mode,
@@ -138,22 +154,35 @@ def main(argv: list[str] | None = None, model_override: ModelClient | None = Non
         ask_human=terminal_ask_human,
         system=SYSTEM_PROMPT,
         max_iterations=config.max_iterations,
+        memory=memory,
+        memory_scope=args.scope,
     )
 
     if args.prompt:
         _run_one_turn(loop, session, history, args.prompt)
         return 0
 
-    print(f"Lulu -- session {session.session_id} -- mode={mode.value} -- root={root}")
+    print(f"Lulu -- session {session.session_id} -- mode={mode.value} -- provider={config.provider} -- root={root}")
+    last_trace: RoutingTrace | None = None
     while True:
         try:
             user_input = input("\n> ")
         except (EOFError, KeyboardInterrupt):
             print()
             return 0
-        if user_input.strip() in ("exit", "quit"):
+        stripped = user_input.strip()
+        if stripped in ("exit", "quit"):
             return 0
-        history = _run_one_turn(loop, session, history, user_input)
+        if stripped == "/trace":
+            print(render_trace(last_trace) if last_trace else "(no trace yet -- run a turn first)")
+            continue
+        if stripped == "/cost":
+            if last_trace:
+                print(render_cost(last_trace, list(memory.router.shards), memory.assembler.k))
+            else:
+                print("(no trace yet -- run a turn first)")
+            continue
+        history, last_trace = _run_one_turn(loop, session, history, user_input)
 
 
 if __name__ == "__main__":

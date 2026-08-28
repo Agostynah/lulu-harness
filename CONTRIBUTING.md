@@ -3,8 +3,10 @@
 ## Setup
 
 ```bash
-uv sync                 # core deps -- what you need to run the test suite
-uv sync --group eval    # + fastembed/datasets, only needed for evals/dbpedia
+uv sync                 # core deps -- includes fastembed (memory.py needs it for
+                         # real `lulu` runs); the test suite mocks embedding, no
+                         # model download required to run it
+uv sync --group eval    # + datasets, only needed to download evals/dbpedia's corpus
 cp .env.example .env    # only needed to run `uv run lulu` against a real model --
                          # the test suite mocks the SDK, no key required
 ```

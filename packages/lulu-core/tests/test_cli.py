@@ -19,8 +19,18 @@ from lulu.llm.anthropic_client import AnthropicClient
 from lulu.llm.client import ToolCall
 from lulu.llm.ollama_client import OllamaClient
 from lulu.llm.openrouter_client import OpenRouterClient
+from lulu.memory import MemoryStore
 
+from .fakes.embedder import ZeroEmbedder
 from .fakes.model_client import FakeModelClient, text_response, tool_call_response
+
+
+def _fake_memory() -> MemoryStore:
+    """A real MemoryStore, but wired to ZeroEmbedder so AgentLoop's
+    memory.search()/.write() calls never try to load the actual
+    embedding model -- these tests care about CLI wiring, not retrieval
+    quality (that's test_memory.py's job)."""
+    return MemoryStore(embedder=ZeroEmbedder())
 
 
 def test_build_tool_registry_registers_all_six_tools(tmp_path: Path):
@@ -78,7 +88,11 @@ def test_main_one_shot_prompt_runs_full_wiring(tmp_path: Path, capsys):
     model = FakeModelClient()
     model.queue(text_response("all done, no tools needed"))
 
-    exit_code = main(["do the thing", "--root", str(root), "--mode", "manual"], model_override=model)
+    exit_code = main(
+        ["do the thing", "--root", str(root), "--mode", "manual"],
+        model_override=model,
+        memory_override=_fake_memory(),
+    )
 
     assert exit_code == 0
     assert "all done" in capsys.readouterr().out
@@ -93,7 +107,11 @@ def test_main_writes_permissions_log_on_tool_use(tmp_path: Path):
     model.queue(tool_call_response([ToolCall(id="tc1", name="write_file", arguments={"path": "a.py", "content": "x"})]))
     model.queue(text_response("done"))
 
-    main(["write a file", "--root", str(root), "--mode", "auto_edits"], model_override=model)
+    main(
+        ["write a file", "--root", str(root), "--mode", "auto_edits"],
+        model_override=model,
+        memory_override=_fake_memory(),
+    )
 
     permissions_log = root / ".lulu" / "logs" / "permissions.jsonl"
     assert permissions_log.exists()
@@ -115,7 +133,11 @@ def test_main_two_racing_sessions_second_gets_asked_about_lock(tmp_path: Path, m
         tool_call_response([ToolCall(id="tc1", name="write_file", arguments={"path": "shared.py", "content": "v1"})])
     )
     model_a.queue(text_response("done a"))
-    main(["task A", "--root", str(root), "--mode", "auto_edits"], model_override=model_a)
+    main(
+        ["task A", "--root", str(root), "--mode", "auto_edits"],
+        model_override=model_a,
+        memory_override=_fake_memory(),
+    )
 
     assert (root / "shared.py").read_text() == "v1"
 
@@ -126,7 +148,11 @@ def test_main_two_racing_sessions_second_gets_asked_about_lock(tmp_path: Path, m
     model_b.queue(text_response("done b"))
     monkeypatch.setattr("builtins.input", lambda *_: "n")  # human denies -- v2 must never land
 
-    main(["task B", "--root", str(root), "--mode", "auto_edits"], model_override=model_b)
+    main(
+        ["task B", "--root", str(root), "--mode", "auto_edits"],
+        model_override=model_b,
+        memory_override=_fake_memory(),
+    )
 
     captured = capsys.readouterr()
     assert "locked by another session" in captured.out
@@ -136,3 +162,34 @@ def test_main_two_racing_sessions_second_gets_asked_about_lock(tmp_path: Path, m
 # TTL expiry (a lock naturally stops mattering once it's stale) is covered
 # directly and fast in test_locks.py / test_permissions_locks.py via a
 # monkeypatched timestamp -- not re-tested here with a real 5-minute wait.
+
+
+def _scripted_input(monkeypatch: pytest.MonkeyPatch, lines: list[str]) -> None:
+    remaining = iter(lines)
+    monkeypatch.setattr("builtins.input", lambda *_: next(remaining))
+
+
+def test_trace_command_before_any_turn_shows_placeholder(tmp_path: Path, monkeypatch, capsys):
+    root = tmp_path / "proj"
+    root.mkdir()
+    _scripted_input(monkeypatch, ["/trace", "exit"])
+
+    main(["--root", str(root)], model_override=FakeModelClient(), memory_override=_fake_memory())
+
+    assert "no trace yet" in capsys.readouterr().out
+
+
+def test_trace_and_cost_commands_render_after_a_real_turn(tmp_path: Path, monkeypatch, capsys):
+    root = tmp_path / "proj"
+    root.mkdir()
+    model = FakeModelClient()
+    model.queue(text_response("hi there"))
+    _scripted_input(monkeypatch, ["hello", "/trace", "/cost", "exit"])
+
+    main(["--root", str(root)], model_override=model, memory_override=_fake_memory())
+
+    output = capsys.readouterr().out
+    assert "/trace" in output
+    assert "shards:" in output
+    assert "/cost" in output
+    assert "would have been" in output

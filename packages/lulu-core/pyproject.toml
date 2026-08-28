@@ -8,6 +8,7 @@ dependencies = [
     "anthropic>=0.40.0",
     "mcp>=1.0.0",
     "openai>=1.50.0",
+    "fastembed>=0.5.0",
 ]
 
 [project.scripts]

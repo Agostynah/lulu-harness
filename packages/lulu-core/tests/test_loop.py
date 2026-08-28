@@ -12,9 +12,11 @@ from pathlib import Path
 from lulu.attention import AttentionMode
 from lulu.llm.client import Message, ToolCall
 from lulu.loop import AgentLoop
+from lulu.memory import MemoryStore
 from lulu.permissions import PermissionChecker
 from lulu.tools.base import Tool
 from lulu.tools.registry import ToolRegistry
+from .fakes.embedder import FakeEmbedder
 from .fakes.model_client import FakeModelClient, text_response, tool_call_response
 
 
@@ -223,3 +225,124 @@ def test_history_is_preserved_and_extended():
     assert result.messages[1].content == "first reply"
     assert result.messages[2].content == "second question"
     assert result.messages[3].content == "second reply"
+
+
+# --- memory integration: the piece that makes ContextAssembler/MemoryRouter
+# actually get called during a real run, not just in evals/dbpedia ---
+
+
+def _memory_with(embedder: FakeEmbedder) -> MemoryStore:
+    return MemoryStore(embedder=embedder, strategy="query_all", k=5)
+
+
+def test_without_memory_configured_trace_is_none():
+    model = FakeModelClient()
+    model.queue(text_response("done"))
+    loop = AgentLoop(
+        model=model,
+        tools=_registry(),
+        permissions=PermissionChecker(mode=AttentionMode.MANUAL),
+        ask_human=lambda *a: True,
+    )
+
+    result = loop.run_turn([], "hello")
+
+    assert result.trace is None
+
+
+def test_memory_retrieval_is_injected_into_the_system_prompt():
+    embedder = FakeEmbedder()
+    embedder.register("decided to use SQLite", [1.0, 0.0, 0.0])
+    embedder.register("what did we decide", [1.0, 0.0, 0.0])
+    embedder.register("User: what did we decide\nLulu: we used SQLite", [0.9, 0.1, 0.0])
+    memory = _memory_with(embedder)
+    memory.write("decided to use SQLite", shard="episodic")
+
+    model = FakeModelClient()
+    model.queue(text_response("we used SQLite"))
+    loop = AgentLoop(
+        model=model,
+        tools=_registry(),
+        permissions=PermissionChecker(mode=AttentionMode.MANUAL),
+        ask_human=lambda *a: True,
+        system="base prompt",
+        memory=memory,
+    )
+
+    result = loop.run_turn([], "what did we decide")
+
+    _messages, _tools, system_sent_to_model = model.calls[0]
+    assert "base prompt" in system_sent_to_model
+    assert "decided to use SQLite" in system_sent_to_model
+    assert result.trace is not None
+    assert result.trace.results != []
+
+
+def test_memory_is_written_after_a_completed_turn():
+    embedder = FakeEmbedder()
+    embedder.register("hello", [1.0, 0.0, 0.0])
+    embedder.register("User: hello\nLulu: hi there!", [0.5, 0.5, 0.0])
+    memory = _memory_with(embedder)
+
+    model = FakeModelClient()
+    model.queue(text_response("hi there!"))
+    loop = AgentLoop(
+        model=model,
+        tools=_registry(),
+        permissions=PermissionChecker(mode=AttentionMode.MANUAL),
+        ask_human=lambda *a: True,
+        memory=memory,
+    )
+
+    loop.run_turn([], "hello")
+
+    episodic_contents = memory._shards["episodic"].store.contents
+    assert any("hi there!" in c for c in episodic_contents)
+
+
+def test_memory_write_is_scoped_when_memory_scope_is_set():
+    embedder = FakeEmbedder()
+    embedder.register("hi", [1.0, 0.0, 0.0])
+    embedder.register("User: hi\nLulu: hello!", [0.5, 0.5, 0.0])
+    memory = _memory_with(embedder)
+
+    model = FakeModelClient()
+    model.queue(text_response("hello!"))
+    loop = AgentLoop(
+        model=model,
+        tools=_registry(),
+        permissions=PermissionChecker(mode=AttentionMode.MANUAL),
+        ask_human=lambda *a: True,
+        memory=memory,
+        memory_scope="customer-a",
+    )
+
+    loop.run_turn([], "hi")
+
+    assert memory._shards["episodic"].allowed_scopes == {"customer-a"}
+
+
+def test_no_memory_write_when_max_iterations_hit_with_no_final_text():
+    """A run that never produces a clean final assistant message (it hit
+    max_iterations mid tool-call) has nothing sensible to record -- must
+    not crash, and must not write an empty/garbage memory."""
+    embedder = FakeEmbedder()
+    embedder.register("loop forever", [1.0, 0.0, 0.0])
+    memory = _memory_with(embedder)
+
+    model = FakeModelClient()
+    for _ in range(3):
+        model.queue(tool_call_response([ToolCall(id="tc_x", name="write_file", arguments={"path": "x"})]))
+    loop = AgentLoop(
+        model=model,
+        tools=_registry(),
+        permissions=PermissionChecker(mode=AttentionMode.AUTO),
+        ask_human=lambda *a: True,
+        memory=memory,
+        max_iterations=3,
+    )
+
+    result = loop.run_turn([], "loop forever")
+
+    assert result.stopped_reason == "max_iterations"
+    assert memory._shards["episodic"].store.ids == []  # nothing written

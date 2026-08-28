@@ -6,12 +6,11 @@ dev = [
     "pytest>=8.0",
     "ruff>=0.15.0",
 ]
-# Only needed for evals/dbpedia/run.py -- kept separate so `uv sync`
-# (what CI and every contributor runs to test) doesn't pull ~200MB of
-# fastembed/onnxruntime/datasets/pyarrow just to run the unit suite.
-# Get it with: uv sync --group eval
+# Only needed to download evals/dbpedia's benchmark corpus -- fastembed
+# moved to lulu-core's core dependencies (memory.py needs it for real
+# `lulu` runs, not just the eval), so this group is lighter than it used
+# to be. Get it with: uv sync --group eval
 eval = [
-    "fastembed>=0.5.0",
     "datasets>=2.19.0",
 ]
 
