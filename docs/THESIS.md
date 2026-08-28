@@ -50,12 +50,18 @@ Things a flat index cannot do **even in principle**, because the vectors
 are already mixed with nowhere to put a boundary:
 
 - A subagent scoped to *customer A* can never retrieve *customer B*'s
-  memories.
+  memories. **Built and tested** (`MemoryStore.shards_for_scope`,
+  `evals/leakage.py`) — this is the one the demo below proves.
 - A `local-only` shard that is never routed into a prompt headed to a
-  third-party model.
-- A `quarantine` shard: memories written from untrusted tool output are
-  stored but never enter a privileged context — prompt-injection
-  containment via the same mechanism.
+  third-party model, and a `quarantine` shard that stores memories written
+  from untrusted tool output but never lets them enter a privileged
+  context (prompt-injection containment via the same mechanism). **Not
+  built yet** — `MemoryStore` today only ships `episodic`/`semantic` shard
+  types; nothing tags a memory's provenance or blocks a shard from being
+  routed to a specific destination model. The scope mechanism that makes
+  customer-A/customer-B isolation real is the same primitive these would
+  need, so the gap is "define two more shard types and a provenance tag,"
+  not "invent a new mechanism" — see ROADMAP.md.
 - Launching a subagent hands it a **routing policy**, not a memory dump.
   Write permissions for tools *and* read permissions for memory — almost no
   harness does the second one.

@@ -296,7 +296,7 @@ def test_memory_is_written_after_a_completed_turn():
 
     loop.run_turn([], "hello")
 
-    episodic_contents = memory._shards["episodic"].store.contents
+    episodic_contents = memory._shards[("episodic", None)].store.contents
     assert any("hi there!" in c for c in episodic_contents)
 
 
@@ -319,7 +319,7 @@ def test_memory_write_is_scoped_when_memory_scope_is_set():
 
     loop.run_turn([], "hi")
 
-    assert memory._shards["episodic"].allowed_scopes == {"customer-a"}
+    assert memory._shards[("episodic", "customer-a")].allowed_scopes == {"customer-a"}
 
 
 def test_no_memory_write_when_max_iterations_hit_with_no_final_text():
@@ -345,4 +345,4 @@ def test_no_memory_write_when_max_iterations_hit_with_no_final_text():
     result = loop.run_turn([], "loop forever")
 
     assert result.stopped_reason == "max_iterations"
-    assert memory._shards["episodic"].store.ids == []  # nothing written
+    assert ("episodic", None) not in memory._shards  # lazy creation: never written, never created

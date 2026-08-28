@@ -16,6 +16,21 @@ KMeans is what evals/dbpedia exercises over a 100K-document research
 corpus; a harness's day-to-day memory starts small and is already
 naturally categorized by why it was written, so clustering it would be
 solving a problem that doesn't exist yet at this scale.
+
+Scope isolation, and a real bug caught by adversarial review rather than
+assumed safe: an earlier version kept exactly ONE physical Shard per
+type (e.g. one "episodic" Shard) and, on a scoped write, UNIONED the new
+scope into that shard's allowed_scopes. That meant once two different
+scopes both wrote to "episodic", shard.permits() passed for either one --
+and since InMemoryShardStore has no per-vector scope of its own, the
+WHOLE merged store (both scopes' content, physically concatenated by
+write()) became searchable by both. This directly contradicted
+evals/leakage.py's proven claim, which never actually exercised this path
+(it builds separate shards by hand, bypassing write() entirely). Fixed by
+keying shards on (type, scope) instead of type alone: each scope gets its
+own physically separate Shard per type, and a search only ever sees the
+shards for its own scope -- see shards_for_scope(). See
+test_memory.py's cross-scope-on-shared-type regression tests.
 """
 
 from __future__ import annotations
@@ -53,30 +68,63 @@ class MemoryStore:
         k: int = 5,
     ) -> None:
         self.embedder = embedder or Embedder()
-        costs = shard_costs or DEFAULT_SHARD_COSTS
-        self._shards: dict[str, Shard] = {
-            name: Shard(id=name, store=InMemoryShardStore(), cost=cost) for name, cost in costs.items()
-        }
-        self.router = MemoryRouter(shards=list(self._shards.values()), judge=GeometricJudge())
-        self.assembler = ContextAssembler(router=self.router, strategy=strategy, k=k)
+        self.shard_costs = shard_costs or DEFAULT_SHARD_COSTS
+        self.strategy = strategy
+        self.k = k
+        self.judge = GeometricJudge()
+        # Keyed on (shard_type, scope) -- NOT just shard_type. This is
+        # the actual fix: two different scopes writing to "episodic"
+        # get two distinct Shard objects (distinct InMemoryShardStore
+        # instances too), never one shared store with a unioned
+        # permission set. See module docstring.
+        self._shards: dict[tuple[str, str | None], Shard] = {}
+
+    def _shard(self, shard_type: str, scope: str | None) -> Shard:
+        if shard_type not in self.shard_costs:
+            raise ValueError(f"unknown shard {shard_type!r}; known shards: {list(self.shard_costs)}")
+        key = (shard_type, scope)
+        if key not in self._shards:
+            shard_id = shard_type if scope is None else f"{shard_type}:{scope}"
+            self._shards[key] = Shard(
+                id=shard_id,
+                store=InMemoryShardStore(),
+                cost=self.shard_costs[shard_type],
+                allowed_scopes=None if scope is None else frozenset({scope}),
+            )
+        return self._shards[key]
+
+    def shards_for_scope(self, scope: str | None) -> list[Shard]:
+        """Every shard a caller with this scope may legitimately search --
+        its own scope's shards, and only its own, regardless of how many
+        other scopes happen to also have written to a shard of the same
+        *type*. Used both by search() and by callers rendering /cost
+        (cli.py, server.py), which must show a scope-appropriate
+        counterfactual rather than one that includes other scopes'
+        shards -- that would itself leak "how much data exists for other
+        tenants," a subtler version of the same class of bug."""
+        return [shard for (_shard_type, shard_scope), shard in self._shards.items() if shard_scope == scope]
 
     def write(self, content: str, shard: str = "episodic", scope: str | None = None) -> None:
-        if shard not in self._shards:
-            raise ValueError(f"unknown shard {shard!r}; known shards: {list(self._shards)}")
-        target = self._shards[shard]
+        # O(n) per write, not O(1): InMemoryShardStore is immutable by
+        # design (see backends/memory.py), so every write rebuilds the
+        # whole shard -- copies every existing id/content and re-stacks
+        # every existing vector -- to append one row. n writes to one
+        # shard is therefore O(n^2) total. Fine at harness scale (a
+        # session writes tens to low hundreds of memories); the honest fix
+        # is a mutable/append-only backend (the TurboVec+SQLite backend
+        # already tracked in this file's module docstring and
+        # ROADMAP.md), not optimizing this loop.
+        target = self._shard(shard, scope)
         store = target.store
         vec = self.embedder.embed(content)
 
-        new_id = f"{shard}-{len(store.ids)}"
+        new_id = f"{target.id}-{len(store.ids)}"
         all_ids = [*store.ids, new_id]
         all_contents = [*store.contents, content]
         all_vectors = vec.reshape(1, -1) if store.vectors is None else np.vstack([store.vectors, vec])
 
         target.store = InMemoryShardStore.from_vectors(all_ids, all_contents, all_vectors)
         target.centroid = _normalize(target.store.vectors.mean(axis=0))
-        if scope is not None:
-            existing = target.allowed_scopes or frozenset()
-            target.allowed_scopes = existing | {scope}
 
     def search(
         self,
@@ -84,5 +132,8 @@ class MemoryStore:
         budget: Budget | None = None,
         scope: str | None = None,
     ) -> AssembledContext:
+        shards = self.shards_for_scope(scope)
+        router = MemoryRouter(shards=shards, judge=self.judge)
+        assembler = ContextAssembler(router=router, strategy=self.strategy, k=self.k)
         query_vec = _normalize(self.embedder.embed(query))
-        return self.assembler.assemble(query, query_vec, budget or Budget(), scope=scope)
+        return assembler.assemble(query, query_vec, budget or Budget(), scope=scope)

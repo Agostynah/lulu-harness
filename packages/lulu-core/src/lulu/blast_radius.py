@@ -27,6 +27,11 @@ _NETWORK_TOKEN = re.compile(r"\b(curl|wget|nc|netcat|ssh|scp|ftp)\b", re.IGNOREC
 _GIT_FORCE_PUSH = re.compile(r"\bgit\s+push\b.*(--force\b|-f\b)", re.IGNORECASE)
 _GIT_RESET_HARD = re.compile(r"\bgit\s+reset\b.*--hard\b", re.IGNORECASE)
 _GIT_CLEAN_FORCE = re.compile(r"\bgit\s+clean\b.*-\w*f", re.IGNORECASE)
+_FIND_DELETE = re.compile(r"\bfind\b.*-delete\b", re.IGNORECASE)
+_DD_TOKEN = re.compile(r"\bdd\b.*\bof=", re.IGNORECASE)
+_MKFS_TOKEN = re.compile(r"\bmkfs\b", re.IGNORECASE)
+_SHRED_TOKEN = re.compile(r"\bshred\b", re.IGNORECASE)
+_TRUNCATE_ZERO = re.compile(r"\btruncate\b.*-s\s*0\b", re.IGNORECASE)
 
 
 def _looks_like_rm_rf(command: str) -> bool:
@@ -74,4 +79,14 @@ def assess_blast_radius(command: str) -> list[str]:
         reasons.append("git reset --hard (discards local changes)")
     if _GIT_CLEAN_FORCE.search(command):
         reasons.append("git clean -f (deletes untracked files)")
+    if _FIND_DELETE.search(command):
+        reasons.append("find -delete (bulk deletes matched files)")
+    if _DD_TOKEN.search(command):
+        reasons.append("dd with of= (raw device/file overwrite)")
+    if _MKFS_TOKEN.search(command):
+        reasons.append("mkfs (formats a filesystem, destroys existing data)")
+    if _SHRED_TOKEN.search(command):
+        reasons.append("shred (irreversibly overwrites file contents)")
+    if _TRUNCATE_ZERO.search(command):
+        reasons.append("truncate -s 0 (destroys file contents in place)")
     return reasons

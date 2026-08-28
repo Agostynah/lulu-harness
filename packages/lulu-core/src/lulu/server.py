@@ -40,8 +40,10 @@ from typing import Any
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from sse_starlette.sse import EventSourceResponse
+from starlette.concurrency import run_in_threadpool
 
 from lulu.attention import AttentionMode
 from lulu.cli import build_model_client, build_tool_registry
@@ -50,7 +52,7 @@ from lulu.counterfactual import compute_counterfactuals, savings_pct
 from lulu.loop import AgentLoop
 from lulu.memory import MemoryStore
 from lulu.permissions import PermissionChecker
-from lulu.session import Session
+from lulu.session import InvalidSessionIdError, Session
 
 DEFAULT_SERVER_MODE = AttentionMode.AUTO_EDITS
 
@@ -70,6 +72,9 @@ class SessionEntry:
     loop: AgentLoop
     session: Session
     last_trace: Any = None  # RoutingTrace | None -- what /api/sessions/{id}/cost compares against
+    last_scope: str | None = None  # the scope that trace was computed under -- /cost must use
+    # the SAME scope, not every shard that happens to exist, or it leaks
+    # "how much data other scopes have" the same way memory.py's own bug did
 
 
 class TurnRequest(BaseModel):
@@ -153,6 +158,10 @@ def create_app(
         allow_methods=["*"],
         allow_headers=["*"],
     )
+
+    @app.exception_handler(InvalidSessionIdError)
+    async def _invalid_session_id(_request, exc: InvalidSessionIdError):
+        return JSONResponse(status_code=400, content={"detail": str(exc)})
     app.state.lulu = state
 
     @app.get("/api/health")
@@ -190,6 +199,7 @@ def create_app(
         result = loop.run_turn(history, body.prompt)
         entry.session.append_turn_result(result, messages_before)
         entry.last_trace = result.trace
+        entry.last_scope = body.scope
         return _serialize_turn_result(result)
 
     @app.get("/api/sessions/{session_id}/cost")
@@ -204,9 +214,8 @@ def create_app(
         if entry.last_trace is None:
             raise HTTPException(status_code=404, detail="no turn has run yet in this session")
 
-        k = state.memory.assembler.k
-        shards = list(state.memory.router.shards)
-        counterfactuals = compute_counterfactuals(shards, k)
+        shards = state.memory.shards_for_scope(entry.last_scope)
+        counterfactuals = compute_counterfactuals(shards, state.memory.k)
         spent = entry.last_trace.spent
 
         return {
@@ -228,9 +237,20 @@ def create_app(
         messages_before = len(history)
         loop = entry.loop
         loop.memory_scope = scope
-        result = loop.run_turn(history, prompt)
+        # run_in_threadpool, not a direct call: this endpoint is `async
+        # def` (required for EventSourceResponse), and loop.run_turn() is
+        # synchronous and can block for the model call's full duration --
+        # called directly, it would freeze uvicorn's single event loop for
+        # every OTHER concurrent session too. Also a real latent crash,
+        # not just a performance concern: once a shard ever wraps an MCP
+        # connector (connectors/mcp.py), that store's search() calls
+        # asyncio.run() internally, which raises immediately if it's
+        # already executing inside a running event loop -- exactly the
+        # situation a direct call from here would create.
+        result = await run_in_threadpool(loop.run_turn, history, prompt)
         entry.session.append_turn_result(result, messages_before)
         entry.last_trace = result.trace
+        entry.last_scope = scope
         payload = _serialize_turn_result(result)
 
         async def event_generator():
@@ -285,6 +305,7 @@ def _json(data: Any) -> str:
 def run() -> None:
     """Entrypoint for `lulu-server` (see pyproject.toml's [project.scripts])."""
     import argparse
+    import sys
 
     import uvicorn
 
@@ -300,6 +321,23 @@ def run() -> None:
         "so MANUAL would make the server silently read-only.",
     )
     args = parser.parse_args()
+
+    if args.host not in ("127.0.0.1", "localhost", "::1"):
+        # No auth layer exists on this server at all (see module
+        # docstring's fail-closed-ASK design, which is about permission
+        # tiers, not identity). 127.0.0.1 makes that a non-issue -- only a
+        # process on this machine can reach it. Anything else, including
+        # 0.0.0.0, exposes every session and every tool this process is
+        # configured to run to whoever can reach the port. Warn loudly
+        # instead of silently trusting the network it's bound to.
+        print(
+            f"[lulu-server] WARNING: binding to {args.host!r}, not localhost. "
+            "This server has no authentication -- anyone who can reach this "
+            "host/port can create sessions and run tools as this process. "
+            "Put a real auth layer (or at least a reverse proxy with one) "
+            "in front before binding beyond 127.0.0.1.",
+            file=sys.stderr,
+        )
 
     mode = AttentionMode(args.mode) if args.mode else None
     app = create_app(root=Path(args.root).resolve(), mode=mode)

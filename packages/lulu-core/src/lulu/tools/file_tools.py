@@ -53,16 +53,20 @@ def make_write_file_tool(
     def handler(args: dict) -> str:
         path = resolve_within_root(root, args["path"])
         path.parent.mkdir(parents=True, exist_ok=True)
+        if locks_dir is not None and session_id is not None:
+            # Claim BEFORE writing, not after: see locks.py and
+            # permissions.py's LOCKABLE_TOOLS check, which reads this claim
+            # before a competing session's write. Claiming after the write
+            # left a window where the file was already mutated but no
+            # claim existed yet for a concurrent session's check_lock() to
+            # see -- narrower is better even though this is advisory, not
+            # a hard mutex (see locks.py's module docstring).
+            claim_lock(locks_dir, args["path"], session_id)
         # newline="": write exactly the bytes implied by `content`, no
         # platform-specific \n -> \r\n translation. Same reasoning as
         # edit_file -- a file tool shouldn't silently transform content
         # the caller gave it verbatim.
         path.write_text(args["content"], encoding="utf-8", newline="")
-        if locks_dir is not None and session_id is not None:
-            # Refresh this session's claim right after writing -- see
-            # locks.py and permissions.py's LOCKABLE_TOOLS check, which is
-            # what actually reads this claim before the *next* write.
-            claim_lock(locks_dir, args["path"], session_id)
         return f"wrote {len(args['content'])} chars to {args['path']}"
 
     return Tool(
@@ -108,9 +112,11 @@ def make_edit_file_tool(
                 "pass replace_all=true or a more specific old_string"
             )
         replaced = text.replace(old, new) if replace_all else text.replace(old, new, 1)
-        path.write_text(replaced, encoding="utf-8", newline="")
         if locks_dir is not None and session_id is not None:
+            # Claim BEFORE writing -- see make_write_file_tool's handler
+            # above for why.
             claim_lock(locks_dir, args["path"], session_id)
+        path.write_text(replaced, encoding="utf-8", newline="")
         n = count if replace_all else 1
         return f"replaced {n} occurrence(s) in {args['path']}"
 

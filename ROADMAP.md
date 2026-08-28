@@ -32,26 +32,51 @@ in commit history or a private notes file.
   bot that flags PRs touching permission-relevant files, Dependabot. Found
   a real cross-platform bug (backslash traversal handled differently on
   POSIX) before it ever shipped.
-
-## Next
-
-- **evals/agent_tasks/** — a small (~25 task), real hand-labeled eval, the
+- **evals/agent_tasks/** — a small (25-task), real hand-labeled eval, the
   actual apples-to-apples test of the LLM judge's quality (DBpedia14's
   "queries" are just similarity probes, not real task questions, so it
-  can't fairly judge a *content-reading* judge).
+  can't fairly judge a *content-reading* judge). Real result: the LLM judge
+  matched or nearly matched the geometric judge's recall while contacting
+  roughly a third as many shards.
 - **evals/leakage.py** — the permission-boundary demo: 200 queries from a
-  scope-restricted agent, `flat_topk` leaks across scopes and routing
-  doesn't. Binary pass/fail, no interpretation needed.
-- **A live MCP server behind the `remote` shard.** The connector
-  (`connectors/mcp.py`) is done and tested against a fake `ClientSession`;
-  it hasn't talked to a real server yet, which matters because the whole
-  point of that shard is a *measured*, not simulated, cost.
+  scope-restricted agent. A genuinely flat, merged index leaks across
+  scopes (~26.5% leak rate at the default separation); Lulu's scoped
+  routing stays at 0% leaks across all 6 strategies. Binary pass/fail, no
+  interpretation needed.
 - **Inspector UI** (`apps/inspector/`) — a local web app (FastAPI + SSE,
   not Electron — see the trade-off this project already worked through)
   showing the `RoutingTrace` for the turn in progress: which shards were
   contacted and why, the judge's verdict each round, the counterfactual
-  savings. Explicitly the first thing to cut if time is short; the CLI's
-  `/trace` and `/cost` already surface the same data as text.
+  savings.
+- **Adversarial security review** — a full-repo red-team pass caught and
+  fixed: a cross-tenant memory-isolation bug in `MemoryStore` (two scopes
+  writing the same shard type were silently merged into one searchable
+  store instead of staying physically separate), an unauthenticated
+  path-traversal in `session.py` (`session_id` was interpolated straight
+  into a filesystem path), a blocking-event-loop / nested-`asyncio.run()`
+  crash risk in `server.py`'s streaming endpoint, and a narrowed
+  claim-before-write ordering in the file-lock TOCTOU window. All fixed
+  with regression tests, not just patched.
+
+## Next
+
+- **A live MCP server behind the `remote` shard.** The connector
+  (`connectors/mcp.py`) is done and tested against a fake `ClientSession`;
+  it hasn't talked to a real server yet, which matters because the whole
+  point of that shard is a *measured*, not simulated, cost.
+- **`local-only` and `quarantine` shard types.** THESIS.md's permission
+  section describes these; today `MemoryStore` only ships
+  `episodic`/`semantic`. The scope-isolation mechanism that makes
+  customer-A/customer-B separation real (`shards_for_scope`) is the same
+  primitive these need — provenance tagging on write, plus a shard flag
+  that blocks it from ever being routed toward a third-party-model prompt.
+  Prompt-injection containment via memory quarantine is the concrete
+  motivating case.
+- **An explicit warning (or real auth) on `server.py`.** It binds to
+  `127.0.0.1` by default and has no authentication layer of its own — fine
+  for local single-user use, a real gap the moment it's ever bound to
+  `0.0.0.0` or put behind a reverse proxy without its own auth in front.
+  Worth a loud runtime warning at minimum before it's worth real auth.
 
 ## Later, deliberately scoped down for now
 

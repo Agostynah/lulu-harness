@@ -113,6 +113,41 @@ def test_normal_git_reset_soft_is_not_flagged():
     assert assess_blast_radius("git reset --soft HEAD~1") == []
 
 
+# --- find -delete, dd, mkfs, shred, truncate -s 0 ---
+
+
+def test_find_delete_is_flagged():
+    assert assess_blast_radius("find . -name '*.log' -delete") != []
+
+
+def test_find_without_delete_is_not_flagged():
+    assert assess_blast_radius("find . -name '*.log'") == []
+
+
+def test_dd_with_of_is_flagged():
+    assert assess_blast_radius("dd if=/dev/zero of=/dev/sda") != []
+
+
+def test_dd_without_of_is_not_flagged():
+    assert assess_blast_radius("dd --version") == []
+
+
+def test_mkfs_is_flagged():
+    assert assess_blast_radius("mkfs.ext4 /dev/sdb1") != []
+
+
+def test_shred_is_flagged():
+    assert assess_blast_radius("shred -u secrets.txt") != []
+
+
+def test_truncate_zero_is_flagged():
+    assert assess_blast_radius("truncate -s 0 important.log") != []
+
+
+def test_truncate_nonzero_is_not_flagged():
+    assert assess_blast_radius("truncate -s 100M sparsefile") == []
+
+
 # --- multiple simultaneous reasons ---
 
 

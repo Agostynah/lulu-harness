@@ -49,7 +49,7 @@ def test_write_updates_shard_centroid():
 
     store.write("first memory", shard="episodic")
 
-    shard = store._shards["episodic"]
+    shard = store._shards[("episodic", None)]
     assert shard.centroid is not None
     assert pytest.approx(float((shard.centroid**2).sum()), abs=1e-5) == 1.0  # normalized
 
@@ -102,6 +102,60 @@ def test_scoped_write_is_invisible_to_an_unscoped_search():
     result = store.search("query", scope=None)
 
     assert "customer A's secret" not in result.text
+
+
+def test_two_different_scopes_writing_the_same_shard_type_stay_isolated():
+    """The actual bug an adversarial review caught: an earlier
+    implementation kept ONE physical shard per type and UNIONED scopes
+    into its allowed_scopes on write, so once customer-a and customer-b
+    both wrote to "episodic", shard.permits() passed for either scope and
+    the merged store (both customers' content) was searchable by both.
+    Two scopes writing to the same shard TYPE must produce two physically
+    separate shards, never one merged store two scopes can both pass the
+    permission check for."""
+    store, embedder = _store()
+    embedder.register("customer A's secret", [1.0, 0.0, 0.0])
+    embedder.register("customer B's secret", [1.0, 0.0, 0.0])  # deliberately identical vector
+    embedder.register("query", [1.0, 0.0, 0.0])
+
+    store.write("customer A's secret", shard="episodic", scope="customer-a")
+    store.write("customer B's secret", shard="episodic", scope="customer-b")
+
+    result_a = store.search("query", scope="customer-a")
+    result_b = store.search("query", scope="customer-b")
+
+    assert "customer A's secret" in result_a.text
+    assert "customer B's secret" not in result_a.text
+    assert "customer B's secret" in result_b.text
+    assert "customer A's secret" not in result_b.text
+
+
+def test_shards_for_scope_never_returns_another_scopes_shard():
+    store, embedder = _store()
+    embedder.register("a", [1.0, 0.0, 0.0])
+    embedder.register("b", [0.0, 1.0, 0.0])
+    store.write("a", shard="episodic", scope="customer-a")
+    store.write("b", shard="semantic", scope="customer-b")
+
+    shards_a = store.shards_for_scope("customer-a")
+    shards_b = store.shards_for_scope("customer-b")
+
+    assert {s.id for s in shards_a} == {"episodic:customer-a"}
+    assert {s.id for s in shards_b} == {"semantic:customer-b"}
+
+
+def test_shards_for_scope_isolates_unscoped_from_scoped():
+    store, embedder = _store()
+    embedder.register("personal note", [1.0, 0.0, 0.0])
+    embedder.register("tenant note", [0.0, 1.0, 0.0])
+    store.write("personal note", shard="episodic", scope=None)
+    store.write("tenant note", shard="episodic", scope="customer-a")
+
+    unscoped_shards = store.shards_for_scope(None)
+    scoped_shards = store.shards_for_scope("customer-a")
+
+    assert {s.id for s in unscoped_shards} == {"episodic"}
+    assert {s.id for s in scoped_shards} == {"episodic:customer-a"}
 
 
 def test_search_respects_a_tight_budget():

@@ -178,7 +178,7 @@ def main(
             continue
         if stripped == "/cost":
             if last_trace:
-                print(render_cost(last_trace, list(memory.router.shards), memory.assembler.k))
+                print(render_cost(last_trace, memory.shards_for_scope(args.scope), memory.k))
             else:
                 print("(no trace yet -- run a turn first)")
             continue
