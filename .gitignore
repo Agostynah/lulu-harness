@@ -12,6 +12,7 @@ uv.lock.tmp
 node_modules/
 dist/
 .vite/
+*.tsbuildinfo
 
 # Runtime data / logs (regenerable, and the dataset stays local by default)
 .lulu/logs/

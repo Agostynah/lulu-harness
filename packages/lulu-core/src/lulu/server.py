@@ -46,6 +46,7 @@ from sse_starlette.sse import EventSourceResponse
 from lulu.attention import AttentionMode
 from lulu.cli import build_model_client, build_tool_registry
 from lulu.config import LuluConfig, load_config
+from lulu.counterfactual import compute_counterfactuals, savings_pct
 from lulu.loop import AgentLoop
 from lulu.memory import MemoryStore
 from lulu.permissions import PermissionChecker
@@ -68,6 +69,7 @@ def server_ask_human(tool_name: str, arguments: dict, reason: str) -> bool:
 class SessionEntry:
     loop: AgentLoop
     session: Session
+    last_trace: Any = None  # RoutingTrace | None -- what /api/sessions/{id}/cost compares against
 
 
 class TurnRequest(BaseModel):
@@ -187,7 +189,37 @@ def create_app(
         loop.memory_scope = body.scope
         result = loop.run_turn(history, body.prompt)
         entry.session.append_turn_result(result, messages_before)
+        entry.last_trace = result.trace
         return _serialize_turn_result(result)
+
+    @app.get("/api/sessions/{session_id}/cost")
+    def get_cost(session_id: str) -> dict[str, Any]:
+        """Counterfactual: what query_all/flat_topk WOULD have cost for
+        the *same shards*, computed without re-running retrieval -- see
+        counterfactual.py. This is what makes the /cost panel's headline
+        number possible on every turn, not just when an eval sweep runs."""
+        entry = state._sessions.get(session_id)
+        if entry is None:
+            raise HTTPException(status_code=404, detail=f"unknown session {session_id!r}")
+        if entry.last_trace is None:
+            raise HTTPException(status_code=404, detail="no turn has run yet in this session")
+
+        k = state.memory.assembler.k
+        shards = list(state.memory.router.shards)
+        counterfactuals = compute_counterfactuals(shards, k)
+        spent = entry.last_trace.spent
+
+        return {
+            "spent": dataclasses.asdict(spent),
+            "counterfactuals": [
+                {
+                    "label": cf.label,
+                    "cost": dataclasses.asdict(cf.cost),
+                    "tokens_saved_pct": savings_pct(spent, cf.cost, attr="tokens"),
+                }
+                for cf in counterfactuals
+            ],
+        }
 
     @app.get("/api/sessions/{session_id}/turn/stream")
     async def stream_turn(session_id: str, prompt: str, scope: str | None = None):
@@ -198,6 +230,7 @@ def create_app(
         loop.memory_scope = scope
         result = loop.run_turn(history, prompt)
         entry.session.append_turn_result(result, messages_before)
+        entry.last_trace = result.trace
         payload = _serialize_turn_result(result)
 
         async def event_generator():

@@ -124,6 +124,34 @@ def test_run_turn_with_memory_produces_a_real_trace(tmp_path: Path):
     assert body["trace"]["results"][0]["content"] == "decided to use SQLite"
 
 
+def test_cost_endpoint_before_any_turn_404s(tmp_path: Path):
+    client = _client(tmp_path)
+    session_id = client.post("/api/sessions").json()["session_id"]
+    response = client.get(f"/api/sessions/{session_id}/cost")
+    assert response.status_code == 404
+
+
+def test_cost_endpoint_reports_counterfactuals_after_a_turn(tmp_path: Path):
+    embedder = FakeEmbedder()
+    embedder.register("decided to use SQLite", [1.0, 0.0, 0.0])
+    embedder.register("what did we decide", [1.0, 0.0, 0.0])
+    embedder.register("User: what did we decide\nLulu: SQLite", [0.9, 0.1, 0.0])
+    memory = MemoryStore(embedder=embedder, strategy="query_all", k=5)
+    memory.write("decided to use SQLite", shard="episodic")
+
+    model = FakeModelClient()
+    model.queue(text_response("SQLite"))
+    client = _client(tmp_path, model=model, memory=memory)
+    session_id = client.post("/api/sessions").json()["session_id"]
+    client.post(f"/api/sessions/{session_id}/turn", json={"prompt": "what did we decide"})
+
+    body = client.get(f"/api/sessions/{session_id}/cost").json()
+
+    labels = {cf["label"] for cf in body["counterfactuals"]}
+    assert labels == {"query_all", "flat_topk"}
+    assert "spent" in body
+
+
 def test_stream_endpoint_emits_sse_events(tmp_path: Path):
     model = FakeModelClient()
     model.queue(text_response("streamed reply"))

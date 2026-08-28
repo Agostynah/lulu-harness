@@ -1,0 +1,25 @@
+{
+  "name": "@lulu/inspector",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Local web UI for Lulu -- chat plus a live Context Assembly panel (which memory shards were contacted, why, the judge's verdict per round, and the counterfactual cost of query_all/flat_topk). Talks to lulu-server over HTTP + SSE. Not Electron -- see decisions_todo.md / ROADMAP.md for that trade-off.",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc -b && vite build",
+    "preview": "vite preview",
+    "typecheck": "tsc -b --noEmit"
+  },
+  "dependencies": {
+    "@tanstack/react-query": "^5.60.0",
+    "react": "^18.3.0",
+    "react-dom": "^18.3.0"
+  },
+  "devDependencies": {
+    "@types/react": "^18.3.0",
+    "@types/react-dom": "^18.3.0",
+    "@vitejs/plugin-react": "^4.3.0",
+    "typescript": "^5.6.0",
+    "vite": "^7.0.0"
+  }
+}
