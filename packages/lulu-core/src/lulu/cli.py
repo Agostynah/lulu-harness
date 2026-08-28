@@ -18,9 +18,11 @@ import sys
 from pathlib import Path
 
 from lulu.attention import AttentionMode
-from lulu.config import load_config
+from lulu.config import VALID_PROVIDERS, LuluConfig, load_config
 from lulu.llm.anthropic_client import AnthropicClient
 from lulu.llm.client import Message, ModelClient
+from lulu.llm.ollama_client import OllamaClient
+from lulu.llm.openrouter_client import OpenRouterClient
 from lulu.loop import AgentLoop
 from lulu.permissions import PermissionChecker
 from lulu.session import Session
@@ -54,6 +56,18 @@ def build_tool_registry(
     return registry
 
 
+def build_model_client(config: LuluConfig) -> ModelClient:
+    """Dispatches on config.provider (validated in config.py, so an
+    unrecognized value never gets here). Each branch is a thin adapter --
+    see llm/openai_compatible.py's docstring for why OpenRouter and Ollama
+    share one implementation instead of duplicating it."""
+    if config.provider == "openrouter":
+        return OpenRouterClient(model=config.model, fallback_models=config.fallback_models)
+    if config.provider == "ollama":
+        return OllamaClient(model=config.model, fallback_models=config.fallback_models)
+    return AnthropicClient(model=config.model, fallback_models=config.fallback_models)
+
+
 def terminal_ask_human(tool_name: str, arguments: dict, reason: str) -> bool:
     print(f"\n[permission] {tool_name}({arguments}) -- {reason}")
     answer = input("Allow? [y/N] ").strip().lower()
@@ -78,6 +92,12 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="Override lulu.toml's attention_mode for this run",
     )
+    parser.add_argument(
+        "--provider",
+        choices=VALID_PROVIDERS,
+        default=None,
+        help="Override lulu.toml's model.provider for this run",
+    )
     parser.add_argument("--session", default=None, help="Resume an existing session id")
     return parser
 
@@ -87,6 +107,8 @@ def main(argv: list[str] | None = None, model_override: ModelClient | None = Non
 
     root = Path(args.root).resolve()
     config = load_config(root / "lulu.toml")
+    if args.provider:
+        config.provider = args.provider
     mode = AttentionMode(args.mode) if args.mode else config.attention_mode
     log_dir = root / ".lulu" / "logs"
     locks_dir = root / ".lulu" / "locks"
@@ -101,7 +123,7 @@ def main(argv: list[str] | None = None, model_override: ModelClient | None = Non
     )
     history = session.load_history()
 
-    model = model_override or AnthropicClient(model=config.model, fallback_models=config.fallback_models)
+    model = model_override or build_model_client(config)
     tools = build_tool_registry(root, locks_dir=locks_dir, session_id=session.session_id)
     permissions = PermissionChecker(
         mode=mode,

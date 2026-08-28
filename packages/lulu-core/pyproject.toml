@@ -7,6 +7,7 @@ dependencies = [
     "lulu-router",
     "anthropic>=0.40.0",
     "mcp>=1.0.0",
+    "openai>=1.50.0",
 ]
 
 [project.scripts]

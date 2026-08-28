@@ -9,10 +9,16 @@ in commit history or a private notes file.
   KMeans partitioning, scope-based permission boundary, two interchangeable
   judges (geometric + LLM-backed), full DBpedia14 replication with real,
   reported numbers (including the negative/nuanced ones).
-- **The harness** (`packages/lulu-core`): Anthropic model client with
-  fallback, sandboxed file tools + bash, `/trace` and `/cost` rendering,
-  session persistence and resume, an MCP connector (unit-tested against a
-  fake session, not yet a live server — see below), and a CLI entrypoint.
+- **The harness** (`packages/lulu-core`): three model providers behind
+  the same `ModelClient` protocol -- Anthropic, plus OpenRouter and Ollama
+  sharing one `OpenAICompatibleClient` implementation (proving "any
+  model, same API" is a real property of the code, not a README claim),
+  each enforcing the requirement that the model actually supports
+  tool-calling since the harness's loop has no fallback path for a model
+  that can't emit structured tool calls. Sandboxed file tools + bash,
+  `/trace` and `/cost` rendering, session persistence and resume, an MCP
+  connector (unit-tested against a fake session, not yet a live server —
+  see below), and a CLI entrypoint with `--provider`/`--mode` overrides.
 - **The attention-interface pilot**: four `AttentionMode` presets
   (`manual`/`plan`/`auto_edits`/`auto`) over the permission system, plus
   `suggest_promotions()` — a non-ML approval-streak suggestion that reads
@@ -49,9 +55,6 @@ in commit history or a private notes file.
 
 ## Later, deliberately scoped down for now
 
-- **More model adapters.** `ModelClient` is a Protocol specifically so this
-  is cheap: OpenRouter and Ollama adapters are each meant to be ~30 lines,
-  not a rewrite.
 - **More judge backends.** Same story — `Judge` is already a Protocol;
   `OllamaJudge` (fully local, $0, nothing leaves the machine) is the
   natural next one.

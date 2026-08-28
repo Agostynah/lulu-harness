@@ -11,8 +11,14 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from lulu.cli import build_tool_registry, main, terminal_ask_human
+import pytest
+
+from lulu.cli import build_model_client, build_tool_registry, main, terminal_ask_human
+from lulu.config import LuluConfig
+from lulu.llm.anthropic_client import AnthropicClient
 from lulu.llm.client import ToolCall
+from lulu.llm.ollama_client import OllamaClient
+from lulu.llm.openrouter_client import OpenRouterClient
 
 from .fakes.model_client import FakeModelClient, text_response, tool_call_response
 
@@ -21,6 +27,38 @@ def test_build_tool_registry_registers_all_six_tools(tmp_path: Path):
     registry = build_tool_registry(tmp_path)
     names = {spec.name for spec in registry.specs()}
     assert names == {"read_file", "write_file", "edit_file", "glob", "grep", "bash"}
+
+
+def test_build_model_client_defaults_to_anthropic():
+    client = build_model_client(LuluConfig(provider="anthropic"))
+    assert isinstance(client, AnthropicClient)
+
+
+def test_build_model_client_dispatches_to_openrouter(monkeypatch):
+    monkeypatch.setenv("OPENROUTER_API_KEY", "test-key")
+    client = build_model_client(LuluConfig(provider="openrouter", model="anthropic/claude-sonnet-5"))
+    assert isinstance(client, OpenRouterClient)
+    assert client.model == "anthropic/claude-sonnet-5"
+
+
+def test_build_model_client_dispatches_to_ollama():
+    client = build_model_client(LuluConfig(provider="ollama", model="llama3.1"))
+    assert isinstance(client, OllamaClient)
+    assert client.model == "llama3.1"
+
+
+def test_provider_flag_overrides_config_default(tmp_path: Path, monkeypatch, capsys):
+    """--provider openrouter should switch the dispatch even with no
+    lulu.toml present (whose default would be anthropic) -- verified by
+    checking main() fails on the *right* reason (no OPENROUTER_API_KEY),
+    proving OpenRouterClient's construction path was actually reached
+    rather than falling through to Anthropic."""
+    root = tmp_path / "proj"
+    root.mkdir()
+    monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
+
+    with pytest.raises(ValueError, match="OPENROUTER_API_KEY"):
+        main(["hi", "--root", str(root), "--provider", "openrouter"])
 
 
 def test_terminal_ask_human_approves_on_y(monkeypatch, capsys):

@@ -63,3 +63,31 @@ def test_invalid_attention_mode_raises_clear_error(tmp_path: Path):
 
     with pytest.raises(ValueError, match="invalid attention_mode"):
         load_config(path)
+
+
+def test_default_provider_is_anthropic(tmp_path: Path):
+    assert load_config(tmp_path / "lulu.toml").provider == "anthropic"
+
+
+def test_provider_is_parsed(tmp_path: Path):
+    path = tmp_path / "lulu.toml"
+    path.write_text('[model]\nprovider = "openrouter"\n', encoding="utf-8")
+
+    config = load_config(path)
+
+    assert config.provider == "openrouter"
+    assert config.model == "claude-sonnet-5"  # default, untouched
+
+
+def test_ollama_provider_is_valid(tmp_path: Path):
+    path = tmp_path / "lulu.toml"
+    path.write_text('[model]\nprovider = "ollama"\n', encoding="utf-8")
+    assert load_config(path).provider == "ollama"
+
+
+def test_invalid_provider_raises_clear_error(tmp_path: Path):
+    path = tmp_path / "lulu.toml"
+    path.write_text('[model]\nprovider = "some_typo_provider"\n', encoding="utf-8")
+
+    with pytest.raises(ValueError, match="invalid model.provider"):
+        load_config(path)
