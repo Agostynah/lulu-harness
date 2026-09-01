@@ -35,6 +35,7 @@ the same honestly-scoped-down tradeoff made there).
 from __future__ import annotations
 
 import dataclasses
+import os
 from pathlib import Path
 from typing import Any
 
@@ -47,11 +48,20 @@ from starlette.concurrency import run_in_threadpool
 
 from lulu.attention import AttentionMode
 from lulu.cli import build_model_client, build_tool_registry
-from lulu.config import LuluConfig, load_config
+from lulu.config import VALID_PROVIDERS, LuluConfig, load_config, write_env_var
 from lulu.counterfactual import compute_counterfactuals, savings_pct
 from lulu.loop import AgentLoop
 from lulu.memory import MemoryStore
 from lulu.permissions import PermissionChecker
+from lulu.profiles import (
+    DEFAULT_PROFILE_NAME,
+    InvalidProfileNameError,
+    ProfileAlreadyExistsError,
+    ProfileNotFoundError,
+    create_profile,
+    list_profiles,
+    load_profile,
+)
 from lulu.session import InvalidSessionIdError, Session
 
 DEFAULT_SERVER_MODE = AttentionMode.AUTO_EDITS
@@ -75,11 +85,43 @@ class SessionEntry:
     last_scope: str | None = None  # the scope that trace was computed under -- /cost must use
     # the SAME scope, not every shard that happens to exist, or it leaks
     # "how much data other scopes have" the same way memory.py's own bug did
+    profile: str = DEFAULT_PROFILE_NAME  # not persisted across a server restart -- see
+    # profiles.py's module docstring; a resumed session falls back to "default" then,
+    # the same limitation memory.py already has for in-process-only state
 
 
 class TurnRequest(BaseModel):
     prompt: str
     scope: str | None = None
+
+
+class ModeRequest(BaseModel):
+    mode: str
+
+
+class ProfileRequest(BaseModel):
+    profile: str
+
+
+class CreateProfileRequest(BaseModel):
+    name: str
+    clone_from: str | None = None
+    persona: str | None = None
+
+
+class ApiKeyRequest(BaseModel):
+    provider: str
+    api_key: str
+    session_id: str | None = None
+
+
+# Only providers server.py's build_model_client actually authenticates
+# with a key -- ollama runs locally with no auth (see .env.example),
+# so it's deliberately absent here rather than mapped to a no-op.
+PROVIDER_ENV_VAR = {
+    "anthropic": "ANTHROPIC_API_KEY",
+    "openrouter": "OPENROUTER_API_KEY",
+}
 
 
 class LuluServer:
@@ -109,7 +151,7 @@ class LuluServer:
         self._model_override = model_override
         self._sessions: dict[str, SessionEntry] = {}
 
-    def _build_loop(self, session_id: str) -> AgentLoop:
+    def _build_loop(self, session_id: str, profile: str) -> AgentLoop:
         model = self._model_override or build_model_client(self.config)
         tools = build_tool_registry(self.root, locks_dir=self.locks_dir, session_id=session_id)
         permissions = PermissionChecker(
@@ -123,11 +165,12 @@ class LuluServer:
             tools=tools,
             permissions=permissions,
             ask_human=server_ask_human,
+            system=load_profile(self.root, profile).persona,
             max_iterations=self.config.max_iterations,
             memory=self.memory,
         )
 
-    def get_or_create_session(self, session_id: str | None) -> SessionEntry:
+    def get_or_create_session(self, session_id: str | None, profile: str = DEFAULT_PROFILE_NAME) -> SessionEntry:
         if session_id and session_id in self._sessions:
             return self._sessions[session_id]
 
@@ -136,7 +179,7 @@ class LuluServer:
             if session_id
             else Session.new(self.log_dir / "sessions")
         )
-        entry = SessionEntry(loop=self._build_loop(session.session_id), session=session)
+        entry = SessionEntry(loop=self._build_loop(session.session_id, profile), session=session, profile=profile)
         self._sessions[session.session_id] = entry
         return entry
 
@@ -154,7 +197,19 @@ def create_app(
     app = FastAPI(title="Lulu")
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
+        # 5173: the inspector's plain-browser dev flow (`npm run dev`,
+        # opened by hand). 5183: the same dev server when Tauri's shell
+        # (apps/inspector/src-tauri) launches it -- fixed via strictPort
+        # in vite.config.ts so it never silently drifts to another port.
+        # Neither actually needs CORS in the common case (relative
+        # fetch("/api/...") calls go through Vite's dev proxy, same
+        # origin) -- this only matters for a direct cross-origin request.
+        allow_origins=[
+            "http://localhost:5173",
+            "http://127.0.0.1:5173",
+            "http://localhost:5183",
+            "http://127.0.0.1:5183",
+        ],
         allow_methods=["*"],
         allow_headers=["*"],
     )
@@ -177,17 +232,147 @@ def create_app(
             "root": str(state.root),
         }
 
+    @app.post("/api/apikey")
+    def set_api_key(body: ApiKeyRequest) -> dict[str, Any]:
+        """The basic-tier onboarding wizard's one real action: persist a
+        key to .env (write_env_var), apply it to THIS process
+        immediately (os.environ, so it's live without a restart), and
+        switch the active provider to match. If session_id is given and
+        already exists, that session's model client is rebuilt on the
+        spot too -- AgentLoop.model is a plain attribute read fresh each
+        turn (see loop.py), so reassigning it is enough; a session
+        created before the key existed would otherwise keep using its
+        original, unauthenticated client for the rest of its life.
+        Deliberately does NOT persist the provider choice into
+        lulu.toml -- tomllib is read-only and this codebase has no TOML
+        writer; state.config.provider changing in-memory is what makes
+        the wizard actually work for this run, and is honestly a smaller
+        promise than claiming the on-disk file changed too."""
+        if body.provider not in VALID_PROVIDERS:
+            raise HTTPException(status_code=400, detail=f"invalid provider {body.provider!r}; must be one of {VALID_PROVIDERS}")
+        if body.provider not in PROVIDER_ENV_VAR:
+            raise HTTPException(status_code=400, detail=f"{body.provider!r} does not take an API key (runs locally)")
+
+        env_var = PROVIDER_ENV_VAR[body.provider]
+        write_env_var(state.root, env_var, body.api_key)
+        os.environ[env_var] = body.api_key
+        state.config.provider = body.provider
+
+        if body.session_id and body.session_id in state._sessions:
+            entry = state._sessions[body.session_id]
+            # Same _model_override-first pattern _build_loop uses --
+            # otherwise this call bypasses test/CLI-injected fakes and
+            # always builds a real SDK client.
+            entry.loop.model = state._model_override or build_model_client(state.config)
+
+        return {"provider": body.provider}
+
+    @app.get("/api/sessions")
+    def list_sessions() -> dict[str, Any]:
+        """For the session sidebar -- every session that has ever been
+        written to disk, most-recently-modified first, with a short
+        preview of its first user message so the list is actually
+        scannable instead of a wall of UUIDs. Deliberately reads straight
+        from disk (Session.list_sessions + a fresh Session.resume per
+        entry) rather than only the in-memory state._sessions cache,
+        since a session created in an earlier server run is still real
+        and resumable -- the cache only holds sessions touched THIS
+        process lifetime."""
+        log_dir = state.log_dir / "sessions"
+        session_ids = Session.list_sessions(log_dir)
+        entries = []
+        for sid in session_ids:
+            path = log_dir / f"{sid}.jsonl"
+            session = Session.resume(sid, log_dir)
+            history = session.load_history()
+            preview = next((m.content for m in history if m.role == "user" and m.content), "(empty session)")
+            entries.append(
+                {
+                    "session_id": sid,
+                    "preview": preview[:80],
+                    "modified_at": path.stat().st_mtime,
+                }
+            )
+        entries.sort(key=lambda e: e["modified_at"], reverse=True)
+        return {"sessions": entries}
+
     @app.post("/api/sessions")
-    def create_session(session_id: str | None = None) -> dict[str, Any]:
-        entry = state.get_or_create_session(session_id)
-        return {"session_id": entry.session.session_id, "history": _serialize_history(entry.session)}
+    def create_session(session_id: str | None = None, profile: str = DEFAULT_PROFILE_NAME) -> dict[str, Any]:
+        try:
+            entry = state.get_or_create_session(session_id, profile=profile)
+        except ProfileNotFoundError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from None
+        return {
+            "session_id": entry.session.session_id,
+            "history": _serialize_history(entry.session),
+            "attention_mode": entry.loop.permissions.mode.value,
+            "profile": entry.profile,
+        }
+
+    @app.get("/api/profiles")
+    def get_profiles() -> dict[str, Any]:
+        return {"profiles": list_profiles(state.root)}
+
+    @app.post("/api/profiles")
+    def post_profile(body: CreateProfileRequest) -> dict[str, Any]:
+        try:
+            profile = create_profile(state.root, body.name, clone_from=body.clone_from, persona=body.persona)
+        except InvalidProfileNameError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from None
+        except ProfileAlreadyExistsError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from None
+        except ProfileNotFoundError as exc:
+            raise HTTPException(status_code=400, detail=f"clone_from: {exc}") from None
+        return {"name": profile.name, "persona": profile.persona}
+
+    @app.post("/api/sessions/{session_id}/profile")
+    def set_profile(session_id: str, body: ProfileRequest) -> dict[str, Any]:
+        """Switches this session's persona live -- sound for the same
+        reason /mode is: AgentLoop.system is a plain mutable attribute
+        read fresh at the top of every run_turn() call (see loop.py), so
+        this takes effect on the very next turn without rebuilding
+        anything."""
+        entry = state._sessions.get(session_id)
+        if entry is None:
+            raise HTTPException(status_code=404, detail=f"unknown session {session_id!r}")
+        try:
+            profile = load_profile(state.root, body.profile)
+        except ProfileNotFoundError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from None
+        entry.loop.system = profile.persona
+        entry.profile = profile.name
+        return {"session_id": session_id, "profile": profile.name}
 
     @app.get("/api/sessions/{session_id}/history")
     def get_history(session_id: str) -> dict[str, Any]:
         entry = state._sessions.get(session_id)
         if entry is None:
             raise HTTPException(status_code=404, detail=f"unknown session {session_id!r}")
-        return {"session_id": session_id, "history": _serialize_history(entry.session)}
+        return {
+            "session_id": session_id,
+            "history": _serialize_history(entry.session),
+            "attention_mode": entry.loop.permissions.mode.value,
+            "profile": entry.profile,
+        }
+
+    @app.post("/api/sessions/{session_id}/mode")
+    def set_mode(session_id: str, body: ModeRequest) -> dict[str, Any]:
+        """Changes this session's AttentionMode live. Sound because
+        PermissionChecker.mode is a plain mutable attribute read fresh on
+        every check() call (see permissions.py) -- no need to rebuild the
+        AgentLoop or its tool registry, just flip the one field the next
+        tool call will read. Per-session, not global: matches how each
+        session already gets its own PermissionChecker instance."""
+        entry = state._sessions.get(session_id)
+        if entry is None:
+            raise HTTPException(status_code=404, detail=f"unknown session {session_id!r}")
+        try:
+            mode = AttentionMode(body.mode)
+        except ValueError:
+            valid = [m.value for m in AttentionMode]
+            raise HTTPException(status_code=400, detail=f"invalid mode {body.mode!r}; must be one of {valid}") from None
+        entry.loop.permissions.mode = mode
+        return {"session_id": session_id, "attention_mode": mode.value}
 
     @app.post("/api/sessions/{session_id}/turn")
     def run_turn(session_id: str, body: TurnRequest) -> dict[str, Any]:

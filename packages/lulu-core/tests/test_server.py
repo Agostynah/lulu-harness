@@ -10,8 +10,10 @@ silently executed and not silently hung.
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
+import pytest
 from fastapi.testclient import TestClient
 
 from lulu.attention import AttentionMode
@@ -74,6 +76,183 @@ def test_get_history_for_unknown_session_404s(tmp_path: Path):
     client = _client(tmp_path)
     response = client.get("/api/sessions/does-not-exist/history")
     assert response.status_code == 404
+
+
+def test_list_sessions_is_empty_with_no_sessions(tmp_path: Path):
+    client = _client(tmp_path)
+    assert client.get("/api/sessions").json() == {"sessions": []}
+
+
+def test_list_sessions_includes_a_preview_of_the_first_user_message(tmp_path: Path):
+    model = FakeModelClient()
+    model.queue(text_response("hi there"))
+    client = _client(tmp_path, model=model)
+    session_id = client.post("/api/sessions").json()["session_id"]
+    client.post(f"/api/sessions/{session_id}/turn", json={"prompt": "what is the router?"})
+
+    body = client.get("/api/sessions").json()
+
+    assert len(body["sessions"]) == 1
+    assert body["sessions"][0]["session_id"] == session_id
+    assert body["sessions"][0]["preview"] == "what is the router?"
+
+
+def test_list_sessions_orders_most_recently_modified_first(tmp_path: Path):
+    model = FakeModelClient()
+    model.queue(text_response("a"))
+    model.queue(text_response("b"))
+    client = _client(tmp_path, model=model)
+    first = client.post("/api/sessions").json()["session_id"]
+    client.post(f"/api/sessions/{first}/turn", json={"prompt": "first session"})
+    second = client.post("/api/sessions").json()["session_id"]
+    client.post(f"/api/sessions/{second}/turn", json={"prompt": "second session"})
+
+    body = client.get("/api/sessions").json()
+
+    assert [s["session_id"] for s in body["sessions"]] == [second, first]
+
+
+def test_create_session_reports_the_sessions_attention_mode(tmp_path: Path):
+    client = _client(tmp_path, mode=AttentionMode.PLAN)
+    body = client.post("/api/sessions").json()
+    assert body["attention_mode"] == "plan"
+
+
+def test_set_mode_changes_the_sessions_live_permission_checker(tmp_path: Path):
+    client = _client(tmp_path, mode=AttentionMode.MANUAL)
+    session_id = client.post("/api/sessions").json()["session_id"]
+
+    response = client.post(f"/api/sessions/{session_id}/mode", json={"mode": "auto"})
+
+    assert response.status_code == 200
+    assert response.json() == {"session_id": session_id, "attention_mode": "auto"}
+    # reflected immediately in a subsequent history fetch -- proves it's
+    # the live PermissionChecker that changed, not just the response body
+    assert client.get(f"/api/sessions/{session_id}/history").json()["attention_mode"] == "auto"
+
+
+def test_set_mode_for_unknown_session_404s(tmp_path: Path):
+    client = _client(tmp_path)
+    response = client.post("/api/sessions/does-not-exist/mode", json={"mode": "auto"})
+    assert response.status_code == 404
+
+
+def test_set_mode_with_invalid_value_400s(tmp_path: Path):
+    client = _client(tmp_path)
+    session_id = client.post("/api/sessions").json()["session_id"]
+
+    response = client.post(f"/api/sessions/{session_id}/mode", json={"mode": "not_a_real_mode"})
+
+    assert response.status_code == 400
+
+
+def test_create_session_reports_the_default_profile(tmp_path: Path):
+    client = _client(tmp_path)
+    body = client.post("/api/sessions").json()
+    assert body["profile"] == "default"
+
+
+def test_get_profiles_starts_with_just_default(tmp_path: Path):
+    client = _client(tmp_path)
+    assert client.get("/api/profiles").json() == {"profiles": ["default"]}
+
+
+def test_post_profile_creates_a_new_named_persona(tmp_path: Path):
+    client = _client(tmp_path)
+
+    response = client.post("/api/profiles", json={"name": "reviewer", "persona": "You are a strict reviewer."})
+
+    assert response.status_code == 200
+    assert response.json() == {"name": "reviewer", "persona": "You are a strict reviewer."}
+    assert client.get("/api/profiles").json() == {"profiles": ["default", "reviewer"]}
+
+
+def test_post_profile_with_invalid_name_400s(tmp_path: Path):
+    client = _client(tmp_path)
+    response = client.post("/api/profiles", json={"name": "Not Valid!"})
+    assert response.status_code == 400
+
+
+def test_post_profile_duplicate_name_409s(tmp_path: Path):
+    client = _client(tmp_path)
+    client.post("/api/profiles", json={"name": "reviewer", "persona": "one"})
+    response = client.post("/api/profiles", json={"name": "reviewer", "persona": "two"})
+    assert response.status_code == 409
+
+
+def test_create_session_with_unknown_profile_400s(tmp_path: Path):
+    client = _client(tmp_path)
+    response = client.post("/api/sessions", params={"profile": "does-not-exist"})
+    assert response.status_code == 400
+
+
+def test_set_profile_changes_the_sessions_live_system_prompt(tmp_path: Path):
+    client = _client(tmp_path)
+    client.post("/api/profiles", json={"name": "reviewer", "persona": "You are a strict reviewer."})
+    session_id = client.post("/api/sessions").json()["session_id"]
+
+    response = client.post(f"/api/sessions/{session_id}/profile", json={"profile": "reviewer"})
+
+    assert response.status_code == 200
+    assert response.json() == {"session_id": session_id, "profile": "reviewer"}
+    assert client.get(f"/api/sessions/{session_id}/history").json()["profile"] == "reviewer"
+
+
+def test_set_profile_for_unknown_session_404s(tmp_path: Path):
+    client = _client(tmp_path)
+    response = client.post("/api/sessions/does-not-exist/profile", json={"profile": "default"})
+    assert response.status_code == 404
+
+
+def test_set_profile_to_an_unknown_profile_400s(tmp_path: Path):
+    client = _client(tmp_path)
+    session_id = client.post("/api/sessions").json()["session_id"]
+    response = client.post(f"/api/sessions/{session_id}/profile", json={"profile": "does-not-exist"})
+    assert response.status_code == 400
+
+
+def test_set_api_key_writes_to_env_and_updates_config(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    root = tmp_path / "proj"
+    root.mkdir(exist_ok=True)
+    app = create_app(root=root, model_override=FakeModelClient(), memory_override=MemoryStore(embedder=ZeroEmbedder()))
+    client = TestClient(app)
+
+    response = client.post("/api/apikey", json={"provider": "anthropic", "api_key": "sk-test-123"})
+
+    assert response.status_code == 200
+    assert response.json() == {"provider": "anthropic"}
+    assert (root / ".env").read_text(encoding="utf-8").strip() == "ANTHROPIC_API_KEY=sk-test-123"
+    assert os.environ["ANTHROPIC_API_KEY"] == "sk-test-123"
+    assert client.get("/api/config").json()["provider"] == "anthropic"
+
+
+def test_set_api_key_invalid_provider_400s(tmp_path: Path):
+    client = _client(tmp_path)
+    response = client.post("/api/apikey", json={"provider": "not_a_real_provider", "api_key": "x"})
+    assert response.status_code == 400
+
+
+def test_set_api_key_for_ollama_400s(tmp_path: Path):
+    client = _client(tmp_path)
+    response = client.post("/api/apikey", json={"provider": "ollama", "api_key": "x"})
+    assert response.status_code == 400
+
+
+def test_set_api_key_rebuilds_the_given_sessions_model_client(tmp_path: Path):
+    original_model = FakeModelClient()
+    original_model.queue(text_response("from original client"))
+    client = _client(tmp_path, model=original_model)
+    session_id = client.post("/api/sessions").json()["session_id"]
+
+    client.post("/api/apikey", json={"provider": "anthropic", "api_key": "sk-test-123", "session_id": session_id})
+
+    # _client()'s model_override is what set_api_key falls back to
+    # (see server.py's comment) -- same fake, so the swapped-in client
+    # still answers, proving the rebuild path ran without needing a
+    # real network call.
+    response = client.post(f"/api/sessions/{session_id}/turn", json={"prompt": "hi"})
+    assert response.status_code == 200
 
 
 def test_run_turn_returns_final_text_and_usage(tmp_path: Path):

@@ -86,15 +86,41 @@ export interface TurnResult {
   usage_totals: UsageTotals;
 }
 
+export const ATTENTION_MODES = ["manual", "plan", "auto_edits", "auto"] as const;
+export type AttentionMode = (typeof ATTENTION_MODES)[number];
+
+// Picked once via OperatorSelect.tsx, persisted in localStorage
+// (App.tsx's UI_TIER_STORAGE_KEY) so it's never asked again on later
+// launches. Purely a frontend display-complexity concept -- the backend
+// has no idea a tier exists, nothing here changes what Lulu can DO.
+export const UI_TIERS = ["basic", "advanced", "technomancer"] as const;
+export type UiTier = (typeof UI_TIERS)[number];
+
 export interface SessionCreateResponse {
   session_id: string;
   history: HistoryMessage[];
+  attention_mode: AttentionMode;
+  profile: string;
+}
+
+export interface SessionSummary {
+  session_id: string;
+  preview: string;
+  modified_at: number;
+}
+
+export interface SessionListResponse {
+  sessions: SessionSummary[];
+}
+
+export interface ProfileListResponse {
+  profiles: string[];
 }
 
 export interface LuluConfigResponse {
   provider: string;
   model: string;
-  attention_mode: string;
+  attention_mode: AttentionMode;
   root: string;
 }
 

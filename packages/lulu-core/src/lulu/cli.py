@@ -19,14 +19,18 @@ from pathlib import Path
 
 from lulu.attention import AttentionMode
 from lulu.commands.render import render_cost, render_trace
-from lulu.config import VALID_PROVIDERS, LuluConfig, load_config
+from lulu.config import DEFAULT_FALLBACK_MODELS, DEFAULT_MODEL, VALID_PROVIDERS, LuluConfig, load_config
 from lulu.llm.anthropic_client import AnthropicClient
+from lulu.llm.anthropic_client import DEFAULT_MODEL as ANTHROPIC_DEFAULT_MODEL
 from lulu.llm.client import Message, ModelClient
 from lulu.llm.ollama_client import OllamaClient
+from lulu.llm.ollama_client import DEFAULT_MODEL as OLLAMA_DEFAULT_MODEL
 from lulu.llm.openrouter_client import OpenRouterClient
+from lulu.llm.openrouter_client import DEFAULT_MODEL as OPENROUTER_DEFAULT_MODEL
 from lulu.loop import AgentLoop
 from lulu.memory import MemoryStore
 from lulu.permissions import PermissionChecker
+from lulu.profiles import DEFAULT_PROFILE_NAME, ProfileNotFoundError, load_profile
 from lulu.session import Session
 from lulu.tools.bash_tool import make_bash_tool
 from lulu.tools.file_tools import (
@@ -38,12 +42,6 @@ from lulu.tools.file_tools import (
 )
 from lulu.tools.registry import ToolRegistry
 from lulu_router.trace import RoutingTrace
-
-SYSTEM_PROMPT = (
-    "You are Lulu, an agentic coding assistant. You have file and shell "
-    "tools scoped to the current project. Be direct and make the "
-    "requested change."
-)
 
 
 def build_tool_registry(
@@ -59,16 +57,51 @@ def build_tool_registry(
     return registry
 
 
+def _resolve_model(config: LuluConfig, provider_default: str) -> str:
+    """config.model defaults to config.py's own DEFAULT_MODEL, which is
+    Anthropic-style naming ("claude-sonnet-5") -- correct for provider
+    "anthropic", wrong for the others (OpenRouter needs
+    "anthropic/claude-sonnet-5", Ollama needs a locally-pulled tag like
+    "llama3.1"). Caught by adversarial review, not assumed safe: passing
+    config.model through unconditionally meant switching provider
+    without ALSO hand-editing lulu.toml's model field silently sent the
+    wrong model string to that provider's API. If the user never
+    customized model away from the generic default, use the provider's
+    OWN default instead; if they did customize it, respect that -- they
+    presumably set something valid for their chosen provider."""
+    if config.model == DEFAULT_MODEL:
+        return provider_default
+    return config.model
+
+
+def _resolve_fallback_models(config: LuluConfig) -> list[str] | None:
+    """Same bug, same fix, for the fallback chain: config.fallback_models
+    defaults to ["claude-opus-5"] -- fine for Anthropic, an invalid slug
+    for OpenRouter and a model tag Ollama was never told to pull for
+    Ollama. If the user never customized it, pass None so each client
+    falls back to its OWN default (OpenRouterClient/OllamaClient both
+    default to no fallback chain at all, which is the honest "we don't
+    know a safe cross-provider fallback" answer, not the Anthropic
+    literal)."""
+    if config.fallback_models == DEFAULT_FALLBACK_MODELS:
+        return None
+    return config.fallback_models
+
+
 def build_model_client(config: LuluConfig) -> ModelClient:
     """Dispatches on config.provider (validated in config.py, so an
     unrecognized value never gets here). Each branch is a thin adapter --
     see llm/openai_compatible.py's docstring for why OpenRouter and Ollama
     share one implementation instead of duplicating it."""
+    fallback_models = _resolve_fallback_models(config)
     if config.provider == "openrouter":
-        return OpenRouterClient(model=config.model, fallback_models=config.fallback_models)
+        model = _resolve_model(config, OPENROUTER_DEFAULT_MODEL)
+        return OpenRouterClient(model=model, fallback_models=fallback_models)
     if config.provider == "ollama":
-        return OllamaClient(model=config.model, fallback_models=config.fallback_models)
-    return AnthropicClient(model=config.model, fallback_models=config.fallback_models)
+        model = _resolve_model(config, OLLAMA_DEFAULT_MODEL)
+        return OllamaClient(model=model, fallback_models=fallback_models)
+    model = _resolve_model(config, ANTHROPIC_DEFAULT_MODEL)
+    return AnthropicClient(model=model, fallback_models=config.fallback_models)
 
 
 def terminal_ask_human(tool_name: str, arguments: dict, reason: str) -> bool:
@@ -110,6 +143,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="Identity this run is scoped to -- memory it writes/reads is boundaried "
         "to this scope (see Shard.permits in lulu_router). Omit for unscoped/personal use.",
     )
+    parser.add_argument(
+        "--profile",
+        default=DEFAULT_PROFILE_NAME,
+        help="Named persona to use for this run's system prompt (see profiles.py). "
+        "Defaults to the built-in 'default' profile.",
+    )
     return parser
 
 
@@ -121,6 +160,11 @@ def main(
     args = build_parser().parse_args(argv)
 
     root = Path(args.root).resolve()
+    try:
+        persona = load_profile(root, args.profile).persona
+    except ProfileNotFoundError as exc:
+        print(f"lulu: {exc}", file=sys.stderr)
+        return 1
     config = load_config(root / "lulu.toml")
     if args.provider:
         config.provider = args.provider
@@ -152,7 +196,7 @@ def main(
         tools=tools,
         permissions=permissions,
         ask_human=terminal_ask_human,
-        system=SYSTEM_PROMPT,
+        system=persona,
         max_iterations=config.max_iterations,
         memory=memory,
         memory_scope=args.scope,

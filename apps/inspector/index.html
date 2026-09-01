@@ -4,6 +4,20 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Lulu Inspector</title>
+    <!-- Inline, not in styles.css: this has to paint before the app's
+         own stylesheet finishes loading, or the window shows a white
+         flash for the gap between the native window opening and React
+         mounting. Kept in sync with --bg in styles.css by eye since it
+         must not depend on that file loading first. -->
+    <style>
+      html,
+      body,
+      #root {
+        background: #0a0a0f;
+        height: 100%;
+        margin: 0;
+      }
+    </style>
   </head>
   <body>
     <div id="root"></div>

@@ -57,30 +57,75 @@ in commit history or a private notes file.
   crash risk in `server.py`'s streaming endpoint, and a narrowed
   claim-before-write ordering in the file-lock TOCTOU window. All fixed
   with regression tests, not just patched.
+- **Tauri desktop shell — window wrap (step 1 of 3, see below for the
+  rest).** Custom title bar (drag region, brand, min/max/close), full
+  icon set, no white-flash-on-open, and a real fix for a Windows/Docker
+  shell mismatch in the dev flow. The backend sidecar and a real
+  installer are still open — see Next.
+- **AttentionMode / scope / profile selectors + session sidebar.** All
+  live-mutable through the running server (`PermissionChecker.mode`,
+  `AgentLoop.system` are read fresh every turn, no session rebuild
+  needed): `POST /api/sessions/{id}/mode`, per-turn memory `scope` now
+  actually wired from the UI (the API already supported it, nothing
+  called it), `profiles.py` (file-backed personas at
+  `.lulu/profiles/<name>/persona.md`, git-versionable by design) +
+  `POST /api/profiles` + `POST /api/sessions/{id}/profile`, and
+  `GET /api/sessions` (session list with preview text) for the sidebar.
+- **The `.env`-loading gap, closed.** Nothing in the codebase ever
+  actually read `.env` before this — `.env.example`'s own comment
+  claiming automatic pickup was simply wrong unless a shell had already
+  exported the variable. `config.py`'s `load_dotenv`/`write_env_var`
+  fixes it (no new dependency) and is what the onboarding wizard (Next)
+  writes through.
+- **A real provider/model-selection bug, fixed.** `build_model_client`
+  passed Anthropic-style `model`/`fallback_models` defaults to every
+  provider unconditionally — switching to OpenRouter/Ollama without also
+  hand-editing `lulu.toml`'s model field silently sent an invalid model
+  slug. Now falls back to each client's own correct default unless the
+  user explicitly customized it.
 
 ## Next
 
-- **A live MCP server behind the `remote` shard.** The connector
-  (`connectors/mcp.py`) is done and tested against a fake `ClientSession`;
-  it hasn't talked to a real server yet, which matters because the whole
-  point of that shard is a *measured*, not simulated, cost.
-- **`local-only` and `quarantine` shard types.** THESIS.md's permission
-  section describes these; today `MemoryStore` only ships
-  `episodic`/`semantic`. The scope-isolation mechanism that makes
-  customer-A/customer-B separation real (`shards_for_scope`) is the same
-  primitive these need — provenance tagging on write, plus a shard flag
-  that blocks it from ever being routed toward a third-party-model prompt.
-  Prompt-injection containment via memory quarantine is the concrete
-  motivating case.
-- **An explicit warning (or real auth) on `server.py`.** It binds to
-  `127.0.0.1` by default and has no authentication layer of its own — fine
-  for local single-user use, a real gap the moment it's ever bound to
-  `0.0.0.0` or put behind a reverse proxy without its own auth in front.
-  Worth a loud runtime warning at minimum before it's worth real auth.
+Ordered so each step is independently shippable and testable before the
+next one starts — not a flat backlog. Kept to what's genuinely close;
+further-out ideas live in private planning notes, not here.
+
+1. **Finish the operator-select + tiered UI onboarding flow.**
+   `OperatorSelect.tsx` (a blurred background behind 3 tier cards) is
+   drafted but not wired in or styled yet. Once it is: gate the title
+   bar by tier (`basic` = chat only; `advanced` = mode selector +
+   sessions + settings; `technomancer` = everything, exactly as it
+   exists today). This unblocks the work below.
+2. **API key wizard (backend already done).** `basic` = mandatory,
+   can't skip, guided (pick provider → contextual help text/link that
+   changes per provider → paste key → auto-configures a sane model, no
+   model choice shown). `advanced` = same fields, one condensed brief
+   screen, skippable. `technomancer` = no wizard at all.
+3. **Model picker in the UI.** Real must-have gap — there's a
+   mode/scope/profile selector today but no way to see or switch which
+   *model* is active.
+4. **The interactive "prove it can't leak" demo, in the product itself.**
+   `evals/leakage.py` already proves scoped routing never crosses
+   customer boundaries while a flat index does — expose that as a
+   clickable "simulate a cross-scope query" action with a visible result,
+   not something you have to read a script to verify.
+5. **The Python backend as a Tauri sidecar + a real installer.**
+   Compile `lulu-server` to a standalone binary (PyInstaller) per
+   platform, launch it automatically on app start — what makes the
+   desktop app actually installable end-to-end instead of still needing
+   `uv run lulu-server` by hand.
+6. **`local-only` and `quarantine` shard types.** THESIS.md already
+   documents these as not-yet-built; `shards_for_scope` is the same
+   primitive they need.
+7. **A live MCP server behind the `remote` shard.** The connector
+   (`connectors/mcp.py`) is done and tested against a fake
+   `ClientSession`; it hasn't talked to a real server yet, which matters
+   because the whole point of that shard is a *measured*, not simulated,
+   cost.
 
 ## Later, deliberately scoped down for now
 
-- **More judge backends.** Same story — `Judge` is already a Protocol;
+- **More judge backends.** `Judge` is already a Protocol;
   `OllamaJudge` (fully local, $0, nothing leaves the machine) is the
   natural next one.
 - **Memory as the communication channel between concurrent sessions.**
@@ -96,6 +141,3 @@ in commit history or a private notes file.
 - **Volatility-aware re-indexing** — a code shard invalidates on every
   commit, an episodic one almost never does; re-index only what's actually
   stale instead of everything.
-- **A Tauri desktop wrap** once the web UI exists — same UI, ~1 day of
-  work, no rewrite, an order of magnitude smaller than the Electron
-  alternative this project already ruled out.

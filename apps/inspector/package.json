@@ -3,7 +3,7 @@
   "private": true,
   "version": "0.1.0",
   "type": "module",
-  "description": "Local web UI for Lulu -- chat plus a live Context Assembly panel (which memory shards were contacted, why, the judge's verdict per round, and the counterfactual cost of query_all/flat_topk). Talks to lulu-server over HTTP + SSE. Not Electron -- see decisions_todo.md / ROADMAP.md for that trade-off.",
+  "description": "Lulu's UI -- chat plus a live Context Assembly panel (which memory shards were contacted, why, the judge's verdict per round, and the counterfactual cost of query_all/flat_topk). Talks to lulu-server over HTTP + SSE. Runs standalone in a browser for dev, or wrapped in the Tauri desktop shell (src-tauri/) for the installed app -- see ROADMAP.md's Tauri desktop shell entry.",
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
@@ -12,6 +12,7 @@
   },
   "dependencies": {
     "@tanstack/react-query": "^5.60.0",
+    "@tauri-apps/api": "^2.11.1",
     "react": "^18.3.0",
     "react-dom": "^18.3.0"
   },

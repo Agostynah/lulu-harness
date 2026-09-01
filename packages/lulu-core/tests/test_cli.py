@@ -57,6 +57,48 @@ def test_build_model_client_dispatches_to_ollama():
     assert client.model == "llama3.1"
 
 
+# Adversarial-review catch: LuluConfig.model defaults to "claude-sonnet-5"
+# (Anthropic-style naming). Before this fix, build_model_client passed
+# that straight through to every provider unconditionally -- switching
+# provider to "openrouter" without ALSO hand-editing lulu.toml's model
+# field silently sent an invalid model slug ("claude-sonnet-5" instead
+# of "anthropic/claude-sonnet-5") to OpenRouter's API. These tests use
+# the DEFAULT LuluConfig() (no explicit model override) specifically
+# because that's the exact case the earlier tests above don't cover --
+# they all pass a provider-correct model explicitly, which happens to
+# work regardless of whether the underlying bug is fixed.
+def test_build_model_client_with_default_config_uses_openrouters_own_default_model(monkeypatch):
+    monkeypatch.setenv("OPENROUTER_API_KEY", "test-key")
+    client = build_model_client(LuluConfig(provider="openrouter"))
+    assert client.model == "anthropic/claude-sonnet-5"
+
+
+def test_build_model_client_with_default_config_uses_ollamas_own_default_model():
+    client = build_model_client(LuluConfig(provider="ollama"))
+    assert client.model == "llama3.1"
+
+
+def test_build_model_client_respects_an_explicitly_customized_model(monkeypatch):
+    """The other side of the fix: a user who DID set a real, correct
+    model for their provider must still have that respected, not
+    silently replaced by the provider's generic default."""
+    monkeypatch.setenv("OPENROUTER_API_KEY", "test-key")
+    client = build_model_client(LuluConfig(provider="openrouter", model="openai/gpt-5"))
+    assert client.model == "openai/gpt-5"
+
+
+def test_build_model_client_with_default_config_drops_the_anthropic_only_fallback_for_openrouter(monkeypatch):
+    monkeypatch.setenv("OPENROUTER_API_KEY", "test-key")
+    client = build_model_client(LuluConfig(provider="openrouter"))
+    assert client.fallback_models == []
+
+
+def test_build_model_client_respects_explicitly_customized_fallback_models(monkeypatch):
+    monkeypatch.setenv("OPENROUTER_API_KEY", "test-key")
+    client = build_model_client(LuluConfig(provider="openrouter", fallback_models=["openai/gpt-5"]))
+    assert client.fallback_models == ["openai/gpt-5"]
+
+
 def test_provider_flag_overrides_config_default(tmp_path: Path, monkeypatch, capsys):
     """--provider openrouter should switch the dispatch even with no
     lulu.toml present (whose default would be anthropic) -- verified by
