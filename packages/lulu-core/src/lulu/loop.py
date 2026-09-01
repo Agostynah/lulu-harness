@@ -87,16 +87,20 @@ class AgentLoop:
         usages: list[Usage] = []
 
         trace: "RoutingTrace | None" = None
-        effective_system = self.system
+        # Kept separate from self.system, not concatenated into it: memory
+        # results differ on every turn, so folding them into `system`
+        # would put volatile content inside what AnthropicClient treats as
+        # the cacheable prefix, breaking the cache on every single turn
+        # instead of reusing it. See ModelClient's docstring.
+        context = ""
         if self.memory is not None:
             assembled = self.memory.search(user_input, scope=self.memory_scope)
             trace = assembled.trace
-            if assembled.text:
-                effective_system = f"{self.system}\n\n{assembled.text}".strip()
+            context = assembled.text
 
         result: TurnResult | None = None
         for i in range(self.max_iterations):
-            response = self.model.complete(messages, tool_specs, system=effective_system)
+            response = self.model.complete(messages, tool_specs, system=self.system, context=context)
             messages.append(response.message)
             usages.append(response.usage)
 

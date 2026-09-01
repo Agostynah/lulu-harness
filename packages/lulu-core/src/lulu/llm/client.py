@@ -91,13 +91,24 @@ class ModelUnavailableError(Exception):
 
 class ModelClient(Protocol):
     """What any model backend must provide. The loop, tools, and UI never
-    import a concrete provider -- only this Protocol."""
+    import a concrete provider -- only this Protocol.
+
+    `system` and `context` are kept separate on purpose, not just two ways
+    to pass text: `system` is the stable, rarely-changing instructions
+    (persona/tool-use rules) a provider that supports prompt caching can
+    reuse across calls; `context` is per-turn volatile content (e.g.
+    memory-router results) that changes every call and must never sit
+    inside a cached prefix. A caller that concatenates them together
+    before calling defeats caching for providers that implement it -- see
+    AnthropicClient for the adapter that actually marks the cache
+    boundary."""
 
     def complete(
         self,
         messages: list[Message],
         tools: list[ToolSpec],
         system: str = "",
+        context: str = "",
     ) -> ModelResponse: ...
 
     def stream(
@@ -105,4 +116,5 @@ class ModelClient(Protocol):
         messages: list[Message],
         tools: list[ToolSpec],
         system: str = "",
+        context: str = "",
     ) -> Iterator[StreamEvent]: ...

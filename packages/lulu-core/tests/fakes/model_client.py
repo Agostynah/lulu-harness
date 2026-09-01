@@ -13,18 +13,20 @@ from lulu.llm.client import Message, ModelResponse, ToolSpec, Usage
 @dataclass
 class FakeModelClient:
     responses: list[ModelResponse] = field(default_factory=list)
-    calls: list[tuple[list[Message], list[ToolSpec], str]] = field(default_factory=list)
+    calls: list[tuple[list[Message], list[ToolSpec], str, str]] = field(default_factory=list)
 
     def queue(self, response: ModelResponse) -> None:
         self.responses.append(response)
 
-    def complete(self, messages: list[Message], tools: list[ToolSpec], system: str = "") -> ModelResponse:
-        self.calls.append((list(messages), list(tools), system))
+    def complete(
+        self, messages: list[Message], tools: list[ToolSpec], system: str = "", context: str = ""
+    ) -> ModelResponse:
+        self.calls.append((list(messages), list(tools), system, context))
         if not self.responses:
             raise AssertionError("FakeModelClient.complete() called with no queued response left")
         return self.responses.pop(0)
 
-    def stream(self, messages, tools, system=""):
+    def stream(self, messages, tools, system="", context=""):
         raise NotImplementedError("FakeModelClient is complete()-only; loop.py v0 doesn't stream")
 
 

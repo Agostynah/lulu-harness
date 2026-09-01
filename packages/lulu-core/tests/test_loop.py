@@ -271,9 +271,12 @@ def test_memory_retrieval_is_injected_into_the_system_prompt():
 
     result = loop.run_turn([], "what did we decide")
 
-    _messages, _tools, system_sent_to_model = model.calls[0]
-    assert "base prompt" in system_sent_to_model
-    assert "decided to use SQLite" in system_sent_to_model
+    _messages, _tools, system_sent_to_model, context_sent_to_model = model.calls[0]
+    # system stays exactly the stable prompt, unmixed with memory results --
+    # that separation is what lets a caching-capable client cache it across
+    # turns instead of invalidating on every different memory retrieval.
+    assert system_sent_to_model == "base prompt"
+    assert "decided to use SQLite" in context_sent_to_model
     assert result.trace is not None
     assert result.trace.results != []
 

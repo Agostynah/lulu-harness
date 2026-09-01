@@ -92,10 +92,26 @@ flowchart LR
 
 ## Quick start
 
+A packaged, double-click desktop app for Windows/Linux/macOS isn't built
+yet (Tauri sidecar + installer -- tracked as its own step in
+[ROADMAP.md](ROADMAP.md)); until then, both ways to run Lulu today are
+from source.
+
+**CLI:**
+
 ```bash
 uv sync                          # core deps
-uv run pytest                    # 235 tests, ubuntu/windows/macos in CI
+uv run pytest                    # 356 tests, ubuntu/windows/macos in CI
 uv run lulu "fix the typo in X"  # run the harness (needs an Anthropic key)
+```
+
+**Desktop UI** (`apps/inspector/` -- the same Tauri shell the eventual
+installer wraps, run today via two terminals; see
+[its README](apps/inspector/README.md)):
+
+```bash
+uv run lulu-server --root /path/to/your/project   # terminal 1
+cd apps/inspector && npm install && npm run dev    # terminal 2
 ```
 
 ```bash
@@ -108,13 +124,14 @@ uv run python evals/dbpedia/run.py
 ```
 packages/lulu-router/   the routing thesis — partitioning, strategies, judges
 packages/lulu-core/     the harness — loop, tools, permissions, sessions, CLI
+apps/inspector/         the desktop UI (Tauri shell + FastAPI/SSE backend)
 evals/                  reproducible experiments (not part of the test suite)
 docs/THESIS.md          the argument, and how each claim gets falsified
 ```
 
 ## Testing
 
-235 tests, all cross-platform (Linux/macOS/Windows in CI) — several caught
+356 tests, all cross-platform (Linux/macOS/Windows in CI) — several caught
 real, non-hypothetical bugs: a `glob("../x")` pattern that genuinely escapes
 the project root, Windows silently corrupting line endings on every edit,
 and backslash-based path traversal that Windows blocked but Linux didn't
@@ -131,4 +148,15 @@ What's built, what's next, and why — kept in
 
 ## License
 
-[MIT](LICENSE).
+[MIT](LICENSE) for the Lulu source code.
+
+Third-party assets -- including music, sounds, images, fonts, or other
+media -- may be subject to their own licenses and are not automatically
+covered by the MIT License.
+
+**Music.** The music used in the Lulu interface was generated with Suno
+AI and is provided under the applicable Suno terms and usage
+restrictions, not under MIT. See Suno's Rights & Ownership documentation
+for the applicable terms. For redistribution or commercial use of the
+music, those Suno licensing terms take precedence over this project's
+MIT license.

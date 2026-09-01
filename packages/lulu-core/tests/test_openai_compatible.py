@@ -145,6 +145,28 @@ def test_bad_request_without_tools_in_the_call_is_not_reinterpreted():
         client.complete([Message(role="user", content="hi")], tools=[])
 
 
+def test_complete_folds_context_into_system_message():
+    """No explicit cache-breakpoint control on this path (see
+    AnthropicClient for that) -- system and context are just combined the
+    same way loop.py used to before the two were split apart."""
+    fake = FakeOpenAI()
+    fake.chat.completions.queue(FakeChatCompletion(choices=[FakeChoice(FakeMessage(content="ok"))]))
+    client = _client(fake)
+
+    client.complete(
+        [Message(role="user", content="hi")],
+        tools=[],
+        system="stable instructions",
+        context="turn-specific memory results",
+    )
+
+    sent_messages = fake.chat.completions.calls[0]["messages"]
+    assert sent_messages[0] == {
+        "role": "system",
+        "content": "stable instructions\n\nturn-specific memory results",
+    }
+
+
 def test_message_conversion_prepends_system_message():
     converted = _to_openai_messages([Message(role="user", content="hi")], system="be nice")
     assert converted[0] == {"role": "system", "content": "be nice"}

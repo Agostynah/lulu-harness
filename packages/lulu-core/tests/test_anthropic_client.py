@@ -120,7 +120,65 @@ def test_complete_passes_tool_specs_when_present():
     client.complete([Message(role="user", content="hi")], tools=[spec])
 
     sent_tools = fake.messages.create_calls[0]["tools"]
-    assert sent_tools == [{"name": "read_file", "description": "reads a file", "input_schema": {"type": "object"}}]
+    assert sent_tools == [
+        {
+            "name": "read_file",
+            "description": "reads a file",
+            "input_schema": {"type": "object"},
+            "cache_control": {"type": "ephemeral"},
+        }
+    ]
+
+
+def test_only_the_last_tool_spec_gets_a_cache_breakpoint():
+    """Anthropic caches everything up to and including a marked block, so
+    only the LAST tool needs cache_control -- marking every tool would be
+    redundant, not more correct."""
+    fake = FakeAnthropic()
+    fake.messages.queue_create(FakeResponse(content=[FakeTextBlock("ok")]))
+    client = _client(fake)
+    specs = [
+        ToolSpec(name="read_file", description="reads", input_schema={"type": "object"}),
+        ToolSpec(name="write_file", description="writes", input_schema={"type": "object"}),
+    ]
+
+    client.complete([Message(role="user", content="hi")], tools=specs)
+
+    sent_tools = fake.messages.create_calls[0]["tools"]
+    assert "cache_control" not in sent_tools[0]
+    assert sent_tools[1]["cache_control"] == {"type": "ephemeral"}
+
+
+def test_system_prompt_gets_a_cache_breakpoint_and_context_does_not():
+    """`system` (stable) is marked cacheable; `context` (per-turn memory
+    results) sits in its own block right after, with no cache_control --
+    mixing them would break the cache every turn instead of reusing it."""
+    fake = FakeAnthropic()
+    fake.messages.queue_create(FakeResponse(content=[FakeTextBlock("ok")]))
+    client = _client(fake)
+
+    client.complete(
+        [Message(role="user", content="hi")],
+        tools=[],
+        system="stable instructions",
+        context="turn-specific memory results",
+    )
+
+    sent_system = fake.messages.create_calls[0]["system"]
+    assert sent_system == [
+        {"type": "text", "text": "stable instructions", "cache_control": {"type": "ephemeral"}},
+        {"type": "text", "text": "turn-specific memory results"},
+    ]
+
+
+def test_system_omitted_entirely_when_both_empty():
+    fake = FakeAnthropic()
+    fake.messages.queue_create(FakeResponse(content=[FakeTextBlock("ok")]))
+    client = _client(fake)
+
+    client.complete([Message(role="user", content="hi")], tools=[])
+
+    assert fake.messages.create_calls[0]["system"] is anthropic.NOT_GIVEN
 
 
 def test_message_conversion_includes_tool_results():

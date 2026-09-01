@@ -144,14 +144,21 @@ class OpenAICompatibleClient:
         messages: list[Message],
         tools: list[ToolSpec],
         system: str = "",
+        context: str = "",
     ) -> ModelResponse:
+        # No explicit prompt-caching control on this path (unlike
+        # AnthropicClient) -- OpenAI-compatible providers vary in whether/
+        # how they cache, and Ollama-served local models don't benefit
+        # from provider-side caching at all. `context` is folded back into
+        # `system` here, same as loop.py did before this split existed.
+        combined_system = f"{system}\n\n{context}".strip() if context else system
         last_error: Exception | None = None
         for model in self._model_chain():
             try:
                 response = self._client.chat.completions.create(
                     model=model,
                     max_tokens=self.max_tokens,
-                    messages=_to_openai_messages(messages, system),
+                    messages=_to_openai_messages(messages, combined_system),
                     tools=_to_openai_tools(tools) if tools else openai.omit,
                 )
             except openai.BadRequestError as exc:
@@ -187,6 +194,7 @@ class OpenAICompatibleClient:
         messages: list[Message],
         tools: list[ToolSpec],
         system: str = "",
+        context: str = "",
     ) -> Iterator[StreamEvent]:
         """Satisfies the ModelClient Protocol, but is NOT real token-level
         streaming yet: it calls complete() (getting the fallback logic for
@@ -201,7 +209,7 @@ class OpenAICompatibleClient:
         exists). When that lands, this can be swapped for real streaming
         without changing the Protocol or any caller.
         """
-        response = self.complete(messages, tools, system=system)
+        response = self.complete(messages, tools, system=system, context=context)
         if response.message.content:
             yield TextDelta(text=response.message.content)
         for tc in response.message.tool_calls:

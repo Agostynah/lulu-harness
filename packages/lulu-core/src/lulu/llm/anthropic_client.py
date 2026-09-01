@@ -11,6 +11,14 @@ advance to the next model in the chain. Anything else (bad API key,
 malformed request) propagates immediately -- retrying against a different
 model wouldn't fix either of those, and silently swallowing them would
 hide a real bug.
+
+Prompt caching: `system` and the last tool spec each get an ephemeral
+cache breakpoint (see `_to_anthropic_system_blocks`/`_to_anthropic_tools`)
+-- `context` (per-turn memory-router results) deliberately does not, so a
+changing memory block every turn never invalidates the cached prefix.
+Two breakpoints today (tools+system); a third, judge-gated one for a
+consolidated memory block is a separate, not-yet-built experiment -- see
+decisions_todo.md.
 """
 
 from __future__ import annotations
@@ -50,10 +58,33 @@ TRANSIENT_ERRORS = (
 
 
 def _to_anthropic_tools(tools: list[ToolSpec]) -> list[dict[str, Any]]:
-    return [
+    # Tool definitions are stable for a whole session (Lulu's tool surface
+    # is small and fixed -- read/write/edit/glob/grep/bash), so the last
+    # one gets a cache breakpoint: Anthropic caches everything up to and
+    # including a marked block, so this reuses the entire tools array
+    # across every call in the session instead of reprocessing it.
+    out = [
         {"name": t.name, "description": t.description, "input_schema": t.input_schema}
         for t in tools
     ]
+    if out:
+        out[-1] = {**out[-1], "cache_control": {"type": "ephemeral"}}
+    return out
+
+
+def _to_anthropic_system_blocks(system: str, context: str) -> list[dict[str, Any]] | Any:
+    """Builds the `system` argument sent to the SDK as content blocks, not
+    a plain string, so a cache breakpoint can be placed after `system` but
+    before `context` -- `system` is stable across calls in a session and
+    worth caching; `context` (memory-router results) changes every turn
+    and must stay outside the cached prefix, or every turn's different
+    memory content would break the cache instead of reusing it."""
+    blocks: list[dict[str, Any]] = []
+    if system:
+        blocks.append({"type": "text", "text": system, "cache_control": {"type": "ephemeral"}})
+    if context:
+        blocks.append({"type": "text", "text": context})
+    return blocks if blocks else anthropic.NOT_GIVEN
 
 
 def _to_anthropic_messages(messages: list[Message]) -> list[dict[str, Any]]:
@@ -113,6 +144,7 @@ class AnthropicClient:
         messages: list[Message],
         tools: list[ToolSpec],
         system: str = "",
+        context: str = "",
     ) -> ModelResponse:
         last_error: Exception | None = None
         for model in self._model_chain():
@@ -120,7 +152,7 @@ class AnthropicClient:
                 response = self._client.messages.create(
                     model=model,
                     max_tokens=self.max_tokens,
-                    system=system or anthropic.NOT_GIVEN,
+                    system=_to_anthropic_system_blocks(system, context),
                     messages=_to_anthropic_messages(messages),
                     tools=_to_anthropic_tools(tools) if tools else anthropic.NOT_GIVEN,
                 )
@@ -148,6 +180,7 @@ class AnthropicClient:
         messages: list[Message],
         tools: list[ToolSpec],
         system: str = "",
+        context: str = "",
     ) -> Iterator[StreamEvent]:
         last_error: Exception | None = None
         for model in self._model_chain():
@@ -155,7 +188,7 @@ class AnthropicClient:
                 with self._client.messages.stream(
                     model=model,
                     max_tokens=self.max_tokens,
-                    system=system or anthropic.NOT_GIVEN,
+                    system=_to_anthropic_system_blocks(system, context),
                     messages=_to_anthropic_messages(messages),
                     tools=_to_anthropic_tools(tools) if tools else anthropic.NOT_GIVEN,
                 ) as stream:
