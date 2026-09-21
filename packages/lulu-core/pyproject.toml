@@ -5,7 +5,7 @@ description = "Lulu agent harness core: model client, tool loop, permissions, se
 requires-python = ">=3.11"
 dependencies = [
     "lulu-router",
-    "anthropic>=0.40.0",
+    "anthropic>=1.7.0",
     "mcp>=2.2.0",
     "openai>=1.50.0",
     "fastembed>=0.5.0",
