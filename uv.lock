@@ -1073,7 +1073,7 @@ requires-dist = [
     { name = "fastembed", specifier = ">=0.5.0" },
     { name = "lulu-router", editable = "packages/lulu-router" },
     { name = "mcp", specifier = ">=2.2.0" },
-    { name = "openai", specifier = ">=1.50.0" },
+    { name = "openai", specifier = ">=3.16.1" },
     { name = "sse-starlette", specifier = ">=3.4.11" },
     { name = "uvicorn", specifier = ">=0.30.0" },
 ]
@@ -1632,7 +1632,7 @@ wheels = [
 
 [[package]]
 name = "openai"
-version = "3.5.0"
+version = "3.16.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "anyio" },
@@ -1642,9 +1642,9 @@ dependencies = [
     { name = "sniffio" },
     { name = "typing-extensions" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/3e/d3/50ffb9a7bce5097ffeb476905c0661f4468a3ca7bb489b152542f14fdd8e/openai-3.5.0.tar.gz", hash = "sha256:743738bb458a586d0d02d173bf398d29d7d7a80d182d167aa74f1c08814ecc78", size = 1355486, upload-time = "2026-08-27T01:00:49.113Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/af/c9/b1f904e43e98dd2c00709852f87c485b42b434b7c352e04af15f8d72edc4/openai-3.16.1.tar.gz", hash = "sha256:b22c24564cd08d3bf8971303048b57d5c088e49f4a7f57f9a82aae07ad15a014", size = 1695681, upload-time = "2026-09-18T19:01:52.306Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/9d/9f/03bba05ade050f306c9b9e8b99e3681791dbb30148cd76a793c277fed494/openai-3.5.0-py3-none-any.whl", hash = "sha256:7c0873d379655f65fa515c5692c8620e73bf6a6dce3e63f37589bc99bda3fdfd", size = 1697968, upload-time = "2026-08-27T01:00:47.131Z" },
+    { url = "https://files.pythonhosted.org/packages/56/2e/788e497442588ed745a2be594655ef3e7278b960f7776da329a7ba43f9af/openai-3.16.1-py3-none-any.whl", hash = "sha256:abcd166c05deeae6a27d0a82e4ede8ea2008fdeeeb0bedec6b9ff2d1f3c30f38", size = 2053452, upload-time = "2026-09-18T19:01:50.096Z" },
 ]
 
 [[package]]
