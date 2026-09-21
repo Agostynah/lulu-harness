@@ -9,6 +9,16 @@ import type {
   TurnResult,
 } from "./types";
 
+// vite.config.ts's /api proxy only exists under `vite dev` -- the packaged
+// app serves the frontend as a static bundle with no dev server in front
+// of it, so a relative fetch("/api/...") resolves against the webview's
+// own origin (tauri://localhost, or similar) instead of ever reaching
+// lulu-server. import.meta.env.DEV is true only for the real vite dev
+// server (both `npm run dev` and the Tauri shell's `beforeDevCommand`),
+// so it's the same signal that already distinguishes the two cases the
+// proxy comment above describes.
+const API_BASE = import.meta.env.DEV ? "" : "http://127.0.0.1:8420";
+
 async function json<T>(response: Response): Promise<T> {
   if (!response.ok) {
     const body = await response.text();
@@ -18,7 +28,7 @@ async function json<T>(response: Response): Promise<T> {
 }
 
 export async function getConfig(): Promise<LuluConfigResponse> {
-  return json(await fetch("/api/config"));
+  return json(await fetch(`${API_BASE}/api/config`));
 }
 
 export async function createSession(sessionId?: string, profile?: string): Promise<SessionCreateResponse> {
@@ -26,15 +36,15 @@ export async function createSession(sessionId?: string, profile?: string): Promi
   if (sessionId) params.set("session_id", sessionId);
   if (profile) params.set("profile", profile);
   const qs = params.toString();
-  return json(await fetch(`/api/sessions${qs ? `?${qs}` : ""}`, { method: "POST" }));
+  return json(await fetch(`${API_BASE}/api/sessions${qs ? `?${qs}` : ""}`, { method: "POST" }));
 }
 
 export async function listSessions(): Promise<SessionListResponse> {
-  return json(await fetch("/api/sessions"));
+  return json(await fetch(`${API_BASE}/api/sessions`));
 }
 
 export async function listProfiles(): Promise<ProfileListResponse> {
-  return json(await fetch("/api/profiles"));
+  return json(await fetch(`${API_BASE}/api/profiles`));
 }
 
 export async function createProfile(
@@ -43,7 +53,7 @@ export async function createProfile(
   persona?: string
 ): Promise<{ name: string; persona: string }> {
   return json(
-    await fetch("/api/profiles", {
+    await fetch(`${API_BASE}/api/profiles`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ name, clone_from: cloneFrom ?? null, persona: persona ?? null }),
@@ -53,7 +63,7 @@ export async function createProfile(
 
 export async function setProfile(sessionId: string, profile: string): Promise<{ session_id: string; profile: string }> {
   return json(
-    await fetch(`/api/sessions/${encodeURIComponent(sessionId)}/profile`, {
+    await fetch(`${API_BASE}/api/sessions/${encodeURIComponent(sessionId)}/profile`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ profile }),
@@ -63,7 +73,7 @@ export async function setProfile(sessionId: string, profile: string): Promise<{ 
 
 export async function runTurn(sessionId: string, prompt: string, scope?: string): Promise<TurnResult> {
   return json(
-    await fetch(`/api/sessions/${encodeURIComponent(sessionId)}/turn`, {
+    await fetch(`${API_BASE}/api/sessions/${encodeURIComponent(sessionId)}/turn`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ prompt, scope: scope ?? null }),
@@ -74,11 +84,11 @@ export async function runTurn(sessionId: string, prompt: string, scope?: string)
 export async function getHistory(
   sessionId: string
 ): Promise<{ session_id: string; history: HistoryMessage[]; attention_mode: AttentionMode; profile: string }> {
-  return json(await fetch(`/api/sessions/${encodeURIComponent(sessionId)}/history`));
+  return json(await fetch(`${API_BASE}/api/sessions/${encodeURIComponent(sessionId)}/history`));
 }
 
 export async function getCost(sessionId: string): Promise<CostResponse> {
-  return json(await fetch(`/api/sessions/${encodeURIComponent(sessionId)}/cost`));
+  return json(await fetch(`${API_BASE}/api/sessions/${encodeURIComponent(sessionId)}/cost`));
 }
 
 export async function setMode(
@@ -86,7 +96,7 @@ export async function setMode(
   mode: AttentionMode
 ): Promise<{ session_id: string; attention_mode: AttentionMode }> {
   return json(
-    await fetch(`/api/sessions/${encodeURIComponent(sessionId)}/mode`, {
+    await fetch(`${API_BASE}/api/sessions/${encodeURIComponent(sessionId)}/mode`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ mode }),

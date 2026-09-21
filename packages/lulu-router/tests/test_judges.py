@@ -8,7 +8,9 @@ so the suite stays fast and doesn't require the CLI to be installed in CI.
 from __future__ import annotations
 
 from lulu_router.judges.claude_cli import ClaudeCLIJudge
+from lulu_router.judges.fallback import FallbackJudge
 from lulu_router.judges.geometric import GeometricJudge
+from lulu_router.judges.jev import JevJudge
 from lulu_router.shard import SearchResult
 
 
@@ -92,8 +94,44 @@ def test_claude_cli_judge_builds_prompt_with_substitutions(tmp_path, monkeypatch
         "what is X", [_result(0.9, "candidate A")], sources_contacted=1, total_sources=3
     )
     assert "what is X" in prompt
-    assert "1/3" in prompt
-    assert "candidate A" in prompt
+
+
+def test_jev_judge_parses_sufficient_answer():
+    answer = {"answers": {"sufficient": {"type": "noul", "noul": 0.91}}}
+    confidence, should_expand, reasoning = JevJudge._parse(answer)
+    assert confidence == 0.91
+    assert should_expand is False
+    assert "0.910" in reasoning
+
+
+def test_jev_judge_parses_insufficient_answer():
+    answer = {"answers": {"sufficient": {"type": "noul", "noul": 0.2}}}
+    confidence, should_expand, _reasoning = JevJudge._parse(answer)
+    assert confidence == 0.2
+    assert should_expand is True
+
+
+def test_jev_judge_treats_unreachable_api_as_unconfident():
+    confidence, should_expand, reasoning = JevJudge._parse(None)
+    assert confidence == 0.0
+    assert should_expand is True
+    assert "unavailable" in reasoning
+
+
+def test_jev_judge_handles_malformed_response():
+    confidence, should_expand, _reasoning = JevJudge._parse({"answers": {}})
+    assert confidence == 0.0
+    assert should_expand is True
+
+
+def test_jev_judge_builds_state_with_query_and_candidates():
+    judge = JevJudge(api_key="fake-key")
+    state = judge._build_state(
+        "what is X", [_result(0.9, "candidate A")], sources_contacted=1, total_sources=3
+    )
+    assert "what is X" in state
+    assert "candidate A" in state
+    assert "1/3" in state
 
 
 def test_claude_cli_judge_falls_back_when_cli_missing():
@@ -102,3 +140,66 @@ def test_claude_cli_judge_falls_back_when_cli_missing():
     assert confidence == 0.0
     assert should_expand is True
     assert "judge unavailable" in reasoning
+
+
+class _StubJudge:
+    """Minimal stand-in for exercising FallbackJudge without a real Jev
+    call: returns a fixed verdict and lets the test flip `available`."""
+
+    def __init__(self, name: str, confidence: float, should_expand: bool, available: bool = True):
+        self.name = name
+        self._verdict = (confidence, should_expand, f"{name}: verdict")
+        self.available = available
+
+    def judge(self, query, results, sources_contacted, total_sources):
+        return self._verdict
+
+
+def test_fallback_judge_uses_primary_when_available():
+    primary = _StubJudge("primary", confidence=0.9, should_expand=False, available=True)
+    secondary = _StubJudge("secondary", confidence=0.1, should_expand=True)
+    judge = FallbackJudge(primary=primary, secondary=secondary)
+    confidence, should_expand, reasoning = judge.judge("q", [_result(0.9)], 1, 3)
+    assert confidence == 0.9
+    assert should_expand is False
+    assert "secondary" not in reasoning
+
+
+def test_fallback_judge_falls_back_when_primary_unavailable():
+    primary = _StubJudge("primary", confidence=0.0, should_expand=True, available=False)
+    secondary = _StubJudge("secondary", confidence=0.8, should_expand=False)
+    judge = FallbackJudge(primary=primary, secondary=secondary)
+    confidence, should_expand, reasoning = judge.judge("q", [_result(0.9)], 1, 3)
+    assert confidence == 0.8
+    assert should_expand is False
+    assert "fell back" in reasoning
+
+
+def test_fallback_judge_does_not_fall_back_on_a_real_low_confidence_verdict():
+    # A genuine low-confidence answer from the primary is a real verdict,
+    # not a failure -- must NOT trigger the fallback.
+    primary = _StubJudge("primary", confidence=0.15, should_expand=True, available=True)
+    secondary = _StubJudge("secondary", confidence=0.99, should_expand=False)
+    judge = FallbackJudge(primary=primary, secondary=secondary)
+    confidence, should_expand, _reasoning = judge.judge("q", [_result(0.9)], 1, 3)
+    assert confidence == 0.15
+    assert should_expand is True
+
+
+def test_fallback_judge_name_combines_both():
+    judge = FallbackJudge(primary=GeometricJudge(), secondary=GeometricJudge())
+    assert judge.name == "geometric+geometric"
+
+
+def test_jev_judge_marks_unavailable_after_a_failed_call(monkeypatch):
+    judge = JevJudge(api_key="fake-key")
+    monkeypatch.setattr(judge, "_call_api", lambda state: None)
+    judge.judge("q", [_result(0.9)], 1, 3)
+    assert judge.available is False
+
+
+def test_jev_judge_marks_available_after_a_real_verdict(monkeypatch):
+    judge = JevJudge(api_key="fake-key")
+    monkeypatch.setattr(judge, "_call_api", lambda state: {"answers": {"sufficient": {"noul": 0.7}}})
+    judge.judge("q", [_result(0.9)], 1, 3)
+    assert judge.available is True

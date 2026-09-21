@@ -52,7 +52,21 @@ export default function App() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
 
-  const configQuery = useQuery({ queryKey: ["config"], queryFn: getConfig });
+  // The packaged app spawns lulu-server as a sidecar right as this window
+  // opens (see src-tauri/src/lib.rs) -- a PyInstaller onefile binary,
+  // which unpacks itself to a temp dir on every cold start before it can
+  // even bind the port, comfortably longer than react-query's default
+  // retry budget (3 tries, ~7s of backoff). That's not a real failure,
+  // just the sidecar still booting, so this waits far longer and at a
+  // short fixed interval before ever surfacing the "can't reach
+  // lulu-server" error screen -- the loading screen alone covers a slow
+  // cold start just fine (up to 20s: 40 retries * 500ms).
+  const configQuery = useQuery({
+    queryKey: ["config"],
+    queryFn: getConfig,
+    retry: 40,
+    retryDelay: 500,
+  });
 
   const [sessionId, setSessionId] = useState<string | undefined>(undefined);
   const [trace, setTrace] = useState<RoutingTrace | null>(null);
@@ -68,6 +82,14 @@ export default function App() {
   // for the "new" case.
   const sessionMutation = useMutation({
     mutationFn: (id?: string) => createSession(id),
+    // Mutations don't retry by default (unlike useQuery's retry: 3) -- this
+    // fires unconditionally on mount (see the effect below), racing the
+    // sidecar's cold start exactly like configQuery does, so it needs the
+    // same generous retry budget or a transient "not listening yet" failure
+    // here permanently sticks hasError, even after configQuery itself
+    // recovers.
+    retry: 40,
+    retryDelay: 500,
     onSuccess: (data) => {
       setSessionId(data.session_id);
       setModeState(data.attention_mode);

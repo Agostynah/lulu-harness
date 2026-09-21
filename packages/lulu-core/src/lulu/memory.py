@@ -35,12 +35,17 @@ test_memory.py's cross-scope-on-shared-type regression tests.
 
 from __future__ import annotations
 
+import os
+
 import numpy as np
 from lulu_router.backends.memory import InMemoryShardStore
 from lulu_router.cost import Budget, CostProfile
+from lulu_router.judges.fallback import FallbackJudge
 from lulu_router.judges.geometric import GeometricJudge
+from lulu_router.judges.jev import JevJudge
 from lulu_router.router import MemoryRouter
 from lulu_router.shard import Shard
+from lulu_router.strategies import Judge
 
 from lulu.context import AssembledContext, ContextAssembler
 from lulu.embeddings import Embedder
@@ -59,6 +64,20 @@ def _normalize(vec: np.ndarray) -> np.ndarray:
     return vec / norm if norm > 1e-9 else vec
 
 
+def default_judge() -> Judge:
+    """Jev whenever a key is configured, GeometricJudge otherwise -- Jev
+    reads shard content and is cheap enough to be the default rather than
+    an opt-in (see judges/jev.py), but it's an external API call, so it's
+    wrapped in FallbackJudge: a real network failure or outage falls back
+    to GeometricJudge (pure local math, can't be unreachable) for that
+    round instead of taking the whole harness down. No JEV_API_KEY means
+    no network call is ever attempted -- straight to GeometricJudge."""
+    api_key = os.environ.get("JEV_API_KEY")
+    if api_key:
+        return FallbackJudge(primary=JevJudge(api_key=api_key), secondary=GeometricJudge())
+    return GeometricJudge()
+
+
 class MemoryStore:
     def __init__(
         self,
@@ -66,12 +85,13 @@ class MemoryStore:
         shard_costs: dict[str, CostProfile] | None = None,
         strategy: str = "progressive_expansion",
         k: int = 5,
+        judge: Judge | None = None,
     ) -> None:
         self.embedder = embedder or Embedder()
         self.shard_costs = shard_costs or DEFAULT_SHARD_COSTS
         self.strategy = strategy
         self.k = k
-        self.judge = GeometricJudge()
+        self.judge = judge or default_judge()
         # Keyed on (shard_type, scope) -- NOT just shard_type. This is
         # the actual fix: two different scopes writing to "episodic"
         # get two distinct Shard objects (distinct InMemoryShardStore

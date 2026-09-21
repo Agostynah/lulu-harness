@@ -204,11 +204,19 @@ def create_app(
         # Neither actually needs CORS in the common case (relative
         # fetch("/api/...") calls go through Vite's dev proxy, same
         # origin) -- this only matters for a direct cross-origin request.
+        #
+        # tauri://localhost / http://tauri.localhost: the packaged app's
+        # actual webview origin (Linux/macOS use the former, Windows'
+        # WebView2 the latter) -- there's no dev proxy in front of the
+        # bundled build, so src/api.ts's API_BASE hits this server
+        # directly and the request IS cross-origin for real here.
         allow_origins=[
             "http://localhost:5173",
             "http://127.0.0.1:5173",
             "http://localhost:5183",
             "http://127.0.0.1:5183",
+            "tauri://localhost",
+            "http://tauri.localhost",
         ],
         allow_methods=["*"],
         allow_headers=["*"],
