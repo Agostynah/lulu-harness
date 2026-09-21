@@ -91,6 +91,30 @@ export async function getCost(sessionId: string): Promise<CostResponse> {
   return json(await fetch(`${API_BASE}/api/sessions/${encodeURIComponent(sessionId)}/cost`));
 }
 
+export async function setApiKey(
+  provider: string,
+  apiKey: string,
+  sessionId?: string
+): Promise<{ provider: string }> {
+  return json(
+    await fetch(`${API_BASE}/api/apikey`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ provider, api_key: apiKey, session_id: sessionId ?? null }),
+    })
+  );
+}
+
+export async function setJevApiKey(apiKey: string): Promise<{ judge: string }> {
+  return json(
+    await fetch(`${API_BASE}/api/apikey/jev`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ api_key: apiKey }),
+    })
+  );
+}
+
 export async function setMode(
   sessionId: string,
   mode: AttentionMode

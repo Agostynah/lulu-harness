@@ -1,0 +1,93 @@
+name: Release
+
+# Triggered by a version tag (see CONTRIBUTING.md's Releasing section),
+# not by every push -- a release build is slow (PyInstaller + a full
+# Tauri/Rust release build per platform) and produces artifacts nobody
+# wants attached to routine commits.
+on:
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  release:
+    name: build (${{ matrix.platform }})
+    strategy:
+      fail-fast: false
+      matrix:
+        # macOS isn't here yet -- the PyInstaller sidecar has never been
+        # built or run on it, and a release workflow silently producing a
+        # broken macOS artifact is worse than not offering one. Add it
+        # once someone's actually verified the sidecar there (see
+        # ROADMAP.md).
+        include:
+          - platform: linux
+            os: ubuntu-latest
+            target_triple: x86_64-unknown-linux-gnu
+            sidecar_ext: ""
+            tauri_args: --bundles appimage
+          - platform: windows
+            os: windows-latest
+            target_triple: x86_64-pc-windows-msvc
+            sidecar_ext: ".exe"
+            tauri_args: ""
+    runs-on: ${{ matrix.os }}
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+      - run: uv python install 3.11
+      - run: uv sync
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+      - run: npm install
+        working-directory: apps/inspector
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      # Tauri's Linux system deps (see apps/inspector's own local build
+      # notes) -- webkit2gtk-4.1 + patchelf for the AppImage bundler, the
+      # same combination that failed without patchelf locally.
+      - name: Install Linux system dependencies
+        if: matrix.platform == 'linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf
+
+      # Builds lulu-server as a standalone binary and places it where
+      # tauri.conf.json's externalBin expects it -- see the README's
+      # Quick start for the same command run by hand.
+      - name: Build lulu-server sidecar
+        run: >
+          uv run --with pyinstaller --with pyinstaller-hooks-contrib pyinstaller
+          --onefile --name lulu-server
+          --paths packages/lulu-core/src --paths packages/lulu-router/src
+          packages/lulu-core/sidecar_entry.py
+      - name: Place sidecar binary
+        shell: bash
+        run: |
+          mkdir -p apps/inspector/src-tauri/binaries
+          cp dist/lulu-server${{ matrix.sidecar_ext }} \
+            apps/inspector/src-tauri/binaries/lulu-server-${{ matrix.target_triple }}${{ matrix.sidecar_ext }}
+
+      - name: Build and publish
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # linuxdeploy's bundled `strip` doesn't understand the .relr.dyn
+          # ELF section modern glibc/binutils emit -- same failure and fix
+          # as the local build documented in the README.
+          NO_STRIP: 1
+        with:
+          tagName: ${{ github.ref_name }}
+          releaseName: "Lulu ${{ github.ref_name }}"
+          releaseDraft: true
+          prerelease: false
+          projectPath: apps/inspector
+          args: ${{ matrix.tauri_args }}

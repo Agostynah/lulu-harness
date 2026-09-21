@@ -1,15 +1,18 @@
 # Lulu Inspector
 
-Local web UI: chat on the left, a live **Context Assembly** panel on the
-right showing the `RoutingTrace` for the turn in progress -- which memory
-shards were contacted and why, the judge's verdict each expansion round,
-and the counterfactual cost of `query_all`/`flat_topk` for the same query.
-This is the thesis (`docs/THESIS.md`) made visible, turn by turn.
+Chat on the left, a live **Context Assembly** panel on the right showing
+the `RoutingTrace` for the turn in progress -- which memory shards were
+contacted and why, the judge's verdict each expansion round (including
+which judge: geometric, Jev, or the fallback between them), and the
+counterfactual cost of `query_all`/`flat_topk` for the same query. This
+is the thesis (`docs/THESIS.md`) made visible, turn by turn.
 
-Not Electron -- a plain local web app talking to `lulu-server` over HTTP +
-SSE. See `decisions_todo.md` / `ROADMAP.md` for that trade-off.
+A local web app (FastAPI + SSE, not Electron -- see `decisions_todo.md`
+/ `ROADMAP.md` for that trade-off) wrapped in a Tauri desktop shell
+(`src-tauri/`). Runs standalone in a browser for dev, or as a packaged
+app where `lulu-server` ships as a bundled sidecar -- no terminal needed.
 
-## Run it
+## Run it from source (dev)
 
 ```bash
 # terminal 1, from the repo root
@@ -21,18 +24,29 @@ npm install
 npm run dev
 ```
 
-Open the URL Vite prints (default `http://localhost:5173`, or the next
-free port if that's taken).
+Open the URL Vite prints (`http://localhost:5183` -- fixed via
+`strictPort` in `vite.config.ts` so the Tauri shell's `devUrl` always
+knows where to find it; see that file's comment for why 5183 and not
+5173). API keys (model provider and Jev) can be set from the app itself
+via the settings panel, or by hand in `.env` -- see the root README's
+`.env.example`.
 
-## Verified this session, honestly scoped
+## Run it packaged (Linux)
 
-Built without a browser tool available (see `decisions_todo.md`), so
-verification stopped at: TypeScript compiles clean (`npm run typecheck`),
-the production build succeeds (`npm run build`), and the dev server
-correctly proxies `/api/*` to a real running `lulu-server` (confirmed with
-curl against both the direct and proxied endpoints, not just assumed).
-**Actual rendering, styling, and interaction have not been visually
-confirmed** -- run it and see for yourself; report back what's broken.
+```bash
+# from the repo root -- see the root README's Quick start for the full,
+# always-current version of this
+uv run --with pyinstaller --with pyinstaller-hooks-contrib pyinstaller \
+  --onefile --name lulu-server --paths packages/lulu-core/src \
+  --paths packages/lulu-router/src packages/lulu-core/sidecar_entry.py
+cp dist/lulu-server src-tauri/binaries/lulu-server-x86_64-unknown-linux-gnu
+NO_STRIP=1 cargo tauri build --bundles appimage
+```
+
+Produces `src-tauri/target/release/bundle/appimage/Lulu_<version>_amd64.AppImage`
+-- double-click it, no `uv`/Python/Node needed on the machine running it.
+Windows/macOS installers aren't built by hand this way yet; see
+`ROADMAP.md` and `.github/workflows/release.yml` for the CI path.
 
 ## Known limitation: not token-level streaming yet
 

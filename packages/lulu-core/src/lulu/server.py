@@ -51,7 +51,7 @@ from lulu.cli import build_model_client, build_tool_registry
 from lulu.config import VALID_PROVIDERS, LuluConfig, load_config, write_env_var
 from lulu.counterfactual import compute_counterfactuals, savings_pct
 from lulu.loop import AgentLoop
-from lulu.memory import MemoryStore
+from lulu.memory import MemoryStore, default_judge
 from lulu.permissions import PermissionChecker
 from lulu.profiles import (
     DEFAULT_PROFILE_NAME,
@@ -113,6 +113,10 @@ class ApiKeyRequest(BaseModel):
     provider: str
     api_key: str
     session_id: str | None = None
+
+
+class JevApiKeyRequest(BaseModel):
+    api_key: str
 
 
 # Only providers server.py's build_model_client actually authenticates
@@ -233,11 +237,17 @@ def create_app(
 
     @app.get("/api/config")
     def get_config() -> dict[str, Any]:
+        provider_env_var = PROVIDER_ENV_VAR.get(state.config.provider)
         return {
             "provider": state.config.provider,
             "model": state.config.model,
             "attention_mode": state.mode.value,
             "root": str(state.root),
+            "judge": state.memory.judge.name,
+            "jev_configured": bool(os.environ.get("JEV_API_KEY")),
+            # None (not False) for ollama -- it runs locally with no key
+            # to configure at all, a different state than "missing".
+            "provider_configured": bool(os.environ.get(provider_env_var)) if provider_env_var else None,
         }
 
     @app.post("/api/apikey")
@@ -274,6 +284,20 @@ def create_app(
             entry.loop.model = state._model_override or build_model_client(state.config)
 
         return {"provider": body.provider}
+
+    @app.post("/api/apikey/jev")
+    def set_jev_api_key(body: JevApiKeyRequest) -> dict[str, Any]:
+        """Same live-swap pattern as set_api_key above, but for the memory
+        router's judge rather than the session's model client: persist
+        JEV_API_KEY, apply it to this process immediately, and rebuild
+        state.memory.judge via default_judge() so Jev (with its
+        GeometricJudge fallback) takes over on the very next turn --
+        MemoryRouter reads memory.judge fresh each call (see memory.py's
+        search()), so reassigning it is enough."""
+        write_env_var(state.root, "JEV_API_KEY", body.api_key)
+        os.environ["JEV_API_KEY"] = body.api_key
+        state.memory.judge = default_judge()
+        return {"judge": state.memory.judge.name}
 
     @app.get("/api/sessions")
     def list_sessions() -> dict[str, Any]:

@@ -64,6 +64,29 @@ docs/THESIS.md          the actual argument this project is making, and its fals
 A CI workflow leaves an automatic comment on any PR touching the files
 listed above, as a checklist reminder -- not a blocker, just a nudge.
 
+## Releasing
+
+Versioning follows [SemVer](https://semver.org/); the version lives in
+`apps/inspector/src-tauri/tauri.conf.json` and is mirrored (kept equal,
+not independently bumped) in `Cargo.toml`, `package.json`, and both
+`pyproject.toml` files -- this is one product, not separately published
+libraries, so one version number covers all of it.
+
+1. Bump the version in all five files above to the same `X.Y.Z`.
+2. Move `CHANGELOG.md`'s `[Unreleased]` entries under a new `## [X.Y.Z] -
+   YYYY-MM-DD` heading (add one if `[Unreleased]` is empty).
+3. Commit as `Release vX.Y.Z`, then tag and push:
+   ```bash
+   git tag -a vX.Y.Z -m "vX.Y.Z"
+   git push origin main vX.Y.Z
+   ```
+4. Pushing the tag triggers `.github/workflows/release.yml`, which builds
+   the Linux AppImage and Windows installer and attaches them to a
+   GitHub Release as draft -- review it, then publish.
+
+macOS isn't in the release matrix yet (untested with the PyInstaller
+sidecar) -- see `ROADMAP.md`.
+
 ## Reporting a security issue
 
 If you find a way to defeat the path sandbox, the permission system, or

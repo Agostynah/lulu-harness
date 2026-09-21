@@ -1048,7 +1048,7 @@ wheels = [
 
 [[package]]
 name = "lulu-core"
-version = "0.1.0"
+version = "0.2.0"
 source = { editable = "packages/lulu-core" }
 dependencies = [
     { name = "anthropic" },
@@ -1083,7 +1083,7 @@ dev = [{ name = "pytest", specifier = ">=8.0" }]
 
 [[package]]
 name = "lulu-router"
-version = "0.1.0"
+version = "0.2.0"
 source = { editable = "packages/lulu-router" }
 dependencies = [
     { name = "numpy", version = "2.4.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },

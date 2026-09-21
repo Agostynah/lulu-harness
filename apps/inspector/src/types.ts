@@ -122,6 +122,9 @@ export interface LuluConfigResponse {
   model: string;
   attention_mode: AttentionMode;
   root: string;
+  judge: string;
+  jev_configured: boolean;
+  provider_configured: boolean | null;
 }
 
 export interface Counterfactual {

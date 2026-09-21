@@ -83,6 +83,20 @@ in commit history or a private notes file.
   hand-editing `lulu.toml`'s model field silently sent an invalid model
   slug. Now falls back to each client's own correct default unless the
   user explicitly customized it.
+- **JevJudge + FallbackJudge.** A content-reading judge backed by
+  [Jev](https://typesafe.ai), default whenever `JEV_API_KEY` is set,
+  wrapped so a real Jev outage falls back to the geometric judge for
+  that round rather than taking the harness down.
+- **Linux desktop package (half of item 5, below).** `lulu-server` ships
+  as a PyInstaller sidecar the Tauri shell launches and kills
+  automatically — a working `Lulu_amd64.AppImage`, no `uv`/terminal
+  needed on the machine running it. Windows/macOS installers, and CI
+  automation for cutting a release, are still open — see item 5.
+- **API Keys & Connections settings panel.** Not the tiered onboarding
+  wizard item 2 below still wants, but a real, always-available way to
+  save a model-provider key or the Jev key from the UI (`POST
+  /api/apikey`, `POST /api/apikey/jev`) with live feedback per save —
+  previously read-only, pointing you at editing `.env` by hand.
 
 ## Next
 
@@ -96,11 +110,14 @@ further-out ideas live in private planning notes, not here.
    bar by tier (`basic` = chat only; `advanced` = mode selector +
    sessions + settings; `technomancer` = everything, exactly as it
    exists today). This unblocks the work below.
-2. **API key wizard (backend already done).** `basic` = mandatory,
-   can't skip, guided (pick provider → contextual help text/link that
-   changes per provider → paste key → auto-configures a sane model, no
-   model choice shown). `advanced` = same fields, one condensed brief
-   screen, skippable. `technomancer` = no wizard at all.
+2. **Tiered onboarding wizard around the key-setting UI (now built, see
+   Done).** The settings panel already lets you save a provider or Jev
+   key with live feedback — what's still open is the guided `basic`-tier
+   flow around it: mandatory, can't skip, one provider → contextual
+   help text/link that changes per provider → paste key →
+   auto-configures a sane model, no model choice shown. `advanced` =
+   same fields, one condensed brief screen, skippable. `technomancer` =
+   no wizard at all, straight to the panel.
 3. **Model picker in the UI.** Real must-have gap — there's a
    mode/scope/profile selector today but no way to see or switch which
    *model* is active.
@@ -109,11 +126,12 @@ further-out ideas live in private planning notes, not here.
    customer boundaries while a flat index does — expose that as a
    clickable "simulate a cross-scope query" action with a visible result,
    not something you have to read a script to verify.
-5. **The Python backend as a Tauri sidecar + a real installer.**
-   Compile `lulu-server` to a standalone binary (PyInstaller) per
-   platform, launch it automatically on app start — what makes the
-   desktop app actually installable end-to-end instead of still needing
-   `uv run lulu-server` by hand.
+5. **Windows/macOS installers + release CI (Linux half done, see Done).**
+   `.github/workflows/release.yml` builds and publishes the Linux
+   AppImage and a Windows installer on every `vX.Y.Z` tag (see
+   CONTRIBUTING.md's Releasing section) — untested end-to-end since it
+   hasn't run against a real tag yet, and macOS isn't in the matrix at
+   all (PyInstaller sidecar never verified there).
 6. **`local-only` and `quarantine` shard types.** THESIS.md already
    documents these as not-yet-built; `shards_for_scope` is the same
    primitive they need.

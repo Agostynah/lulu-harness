@@ -1029,7 +1029,7 @@ body {
 }
 
 .settings-panel {
-  width: 280px;
+  width: 320px;
   margin: 44px 10px 0 0;
   background: var(--bg-panel);
   border: 1px solid var(--border);
@@ -1100,6 +1100,101 @@ body {
   background: var(--bg-inset);
   padding: 1px 4px;
   border-radius: 4px;
+}
+
+.settings-section {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--border);
+}
+
+.settings-section:last-child {
+  padding-bottom: 0;
+  border-bottom: none;
+}
+
+.settings-section-title {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-dim);
+  margin-bottom: 2px;
+}
+
+.settings-key-row {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 4px;
+}
+
+.settings-key-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.settings-badge {
+  font-size: 10px;
+  padding: 2px 7px;
+  border-radius: 999px;
+  font-family: var(--mono);
+  white-space: nowrap;
+}
+
+.settings-badge.configured {
+  color: var(--success);
+  background: rgba(74, 222, 128, 0.12);
+  border: 1px solid rgba(74, 222, 128, 0.35);
+}
+
+.settings-badge.missing {
+  color: var(--error);
+  background: rgba(248, 113, 113, 0.12);
+  border: 1px solid rgba(248, 113, 113, 0.35);
+}
+
+.settings-key-input-row {
+  display: flex;
+  gap: 6px;
+}
+
+.settings-key-input-row input {
+  flex: 1;
+  min-width: 0;
+  background: var(--bg-inset);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 7px 10px;
+  color: var(--text);
+  font-family: var(--mono);
+  font-size: 12px;
+}
+
+.settings-key-input-row input:focus {
+  outline: 1px solid var(--accent);
+}
+
+.settings-key-input-row button {
+  padding: 7px 12px;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.settings-key-feedback {
+  margin: 0;
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.settings-key-feedback.success {
+  color: var(--success);
+}
+
+.settings-key-feedback.error {
+  color: var(--error);
 }
 
 .layout {

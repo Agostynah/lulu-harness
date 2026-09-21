@@ -9,6 +9,8 @@ import {
   listProfiles,
   listSessions,
   runTurn,
+  setApiKey as apiSetApiKey,
+  setJevApiKey as apiSetJevApiKey,
   setMode as apiSetMode,
   setProfile as apiSetProfile,
 } from "./api";
@@ -197,6 +199,22 @@ export default function App() {
     createProfileMutation.mutate({ name, cloneFrom, persona });
   };
 
+  // Both key mutations invalidate ["config"] on success so the settings
+  // panel's "configured" badges (provider_configured/jev_configured,
+  // judge name) reflect the just-saved key immediately -- without this
+  // the panel would keep showing "missing" until something else happened
+  // to refetch config.
+  const providerKeyMutation = useMutation({
+    mutationFn: ({ provider, apiKey }: { provider: string; apiKey: string }) =>
+      apiSetApiKey(provider, apiKey, sessionId),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["config"] }),
+  });
+
+  const jevKeyMutation = useMutation({
+    mutationFn: (apiKey: string) => apiSetJevApiKey(apiKey),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["config"] }),
+  });
+
   const handleSelectSession = (id: string) => {
     if (id === sessionId) {
       setSidebarOpen(false);
@@ -288,7 +306,14 @@ export default function App() {
             createProfileError={createProfileMutation.isError ? createProfileMutation.error.message : null}
           />
           {settingsOpen && (
-            <SettingsPanel config={configQuery.data ?? null} onClose={() => setSettingsOpen(false)} />
+            <SettingsPanel
+              config={configQuery.data ?? null}
+              onClose={() => setSettingsOpen(false)}
+              onSaveProviderKey={(apiKey) => providerKeyMutation.mutate({ provider: configQuery.data!.provider, apiKey })}
+              providerKeyMutation={providerKeyMutation}
+              onSaveJevKey={(apiKey) => jevKeyMutation.mutate(apiKey)}
+              jevKeyMutation={jevKeyMutation}
+            />
           )}
           <SessionSidebar
             open={sidebarOpen}

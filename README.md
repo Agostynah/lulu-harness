@@ -42,9 +42,13 @@ Two more axes fall out of putting this in a harness, not just a benchmark:
   against prompt-injected memory ever reaching a privileged context.
 - **A judge that reads content, not just geometry.** The paper's confidence
   estimate (`sigmoid(gap) × coverage`) never looks at *what* came back. Lulu
-  adds a second judge — a small model that reads the candidates and decides
-  if they're actually enough — behind the same `Judge` protocol, so either
-  one drives any of the six routing strategies interchangeably.
+  adds content-reading judges — a local `claude` CLI call, or
+  [Jev](https://typesafe.ai) (TypeSafe AI's fast, cheap "System 1"
+  evaluation model, the default whenever `JEV_API_KEY` is set) — behind
+  the same `Judge` protocol, so any of them drives any of the six routing
+  strategies interchangeably. Jev is wrapped in `FallbackJudge`: a real
+  outage or network failure falls back to the geometric judge for that
+  round instead of taking the harness down.
 
 ## Results (DBpedia14, K=16, geometric judge)
 
@@ -77,7 +81,7 @@ flowchart LR
 
     subgraph router["packages/lulu-router — the thesis, standalone"]
         Router["router.py\nMemoryRouter"] --> Strategies["strategies.py\n6 routing strategies"]
-        Strategies --> Judges["judges/\ngeometric | claude_cli"]
+        Strategies --> Judges["judges/\ngeometric | claude_cli | jev | fallback"]
         Strategies --> ShardIf["shard.py\nShard + ShardStore protocol"]
     end
 
@@ -92,26 +96,37 @@ flowchart LR
 
 ## Quick start
 
-A packaged, double-click desktop app for Windows/Linux/macOS isn't built
-yet (Tauri sidecar + installer -- tracked as its own step in
-[ROADMAP.md](ROADMAP.md)); until then, both ways to run Lulu today are
-from source.
-
 **CLI:**
 
 ```bash
 uv sync                          # core deps
-uv run pytest                    # 356 tests, ubuntu/windows/macos in CI
+uv run pytest                    # 367 tests, ubuntu/windows/macos in CI
 uv run lulu "fix the typo in X"  # run the harness (needs an Anthropic key)
 ```
 
-**Desktop UI** (`apps/inspector/` -- the same Tauri shell the eventual
-installer wraps, run today via two terminals; see
+**Desktop UI, from source** (`apps/inspector/`, two terminals; see
 [its README](apps/inspector/README.md)):
 
 ```bash
 uv run lulu-server --root /path/to/your/project   # terminal 1
 cd apps/inspector && npm install && npm run dev    # terminal 2
+```
+
+**Desktop UI, packaged** (Linux; `lulu-server` runs as a bundled sidecar,
+no terminal or `uv` needed on the machine that runs it -- Windows/macOS
+installers are still pending, see [ROADMAP.md](ROADMAP.md)):
+
+```bash
+uv run --with pyinstaller --with pyinstaller-hooks-contrib pyinstaller \
+  --onefile --name lulu-server --paths packages/lulu-core/src \
+  --paths packages/lulu-router/src packages/lulu-core/sidecar_entry.py
+cp dist/lulu-server apps/inspector/src-tauri/binaries/lulu-server-x86_64-unknown-linux-gnu
+cd apps/inspector && npm install
+NO_STRIP=1 cargo tauri build --bundles appimage   # NO_STRIP works around a
+                                                   # linuxdeploy/binutils
+                                                   # incompatibility on very
+                                                   # new glibc (e.g. Arch)
+# -> apps/inspector/src-tauri/target/release/bundle/appimage/Lulu_0.1.0_amd64.AppImage
 ```
 
 ```bash
@@ -131,7 +146,7 @@ docs/THESIS.md          the argument, and how each claim gets falsified
 
 ## Testing
 
-356 tests, all cross-platform (Linux/macOS/Windows in CI) — several caught
+367 tests, all cross-platform (Linux/macOS/Windows in CI) — several caught
 real, non-hypothetical bugs: a `glob("../x")` pattern that genuinely escapes
 the project root, Windows silently corrupting line endings on every edit,
 and backslash-based path traversal that Windows blocked but Linux didn't
