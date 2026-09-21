@@ -97,6 +97,15 @@ in commit history or a private notes file.
   save a model-provider key or the Jev key from the UI (`POST
   /api/apikey`, `POST /api/apikey/jev`) with live feedback per save —
   previously read-only, pointing you at editing `.env` by hand.
+- **`SQLiteShardStore`: memory survives a restart.** `MemoryStore`
+  was honestly in-process only until this — every memory gone the
+  moment `lulu-server` stopped. Now one SQLite file per (shard type,
+  scope) under `.lulu/data/` (already anticipated in `.gitignore`),
+  `add()` is a real `INSERT` instead of `InMemoryShardStore`'s
+  rebuild-the-whole-array-per-write, and `shards_for_scope()` discovers
+  a shard's existing `.db` file on first search even if nothing wrote to
+  it yet this session. `data_dir=None` (tests, evals) keeps the old
+  in-memory behavior exactly as before.
 
 ## Next
 
