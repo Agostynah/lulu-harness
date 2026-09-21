@@ -171,3 +171,42 @@ def test_search_respects_a_tight_budget():
     # strategy tests for that), but the trace should still carry the
     # budget through so /cost can report against it accurately.
     assert result.trace.budget == tiny_budget
+
+
+def test_memories_survive_a_simulated_restart_via_data_dir(tmp_path):
+    # Two separate MemoryStore instances pointed at the same data_dir,
+    # sharing one FakeEmbedder so "decided to use SQLite" maps to the same
+    # vector in both -- the second instance stands in for the harness
+    # restarting (a fresh process, same project root) and must see what
+    # the first one wrote without ever calling write() itself.
+    embedder = FakeEmbedder()
+    embedder.register("decided to use SQLite for the cache", [1.0, 0.0, 0.0])
+    embedder.register("what did we decide about the cache", [1.0, 0.0, 0.0])
+
+    first = MemoryStore(embedder=embedder, strategy="query_all", k=5, data_dir=tmp_path)
+    first.write("decided to use SQLite for the cache", shard="episodic")
+    del first
+
+    second = MemoryStore(embedder=embedder, strategy="query_all", k=5, data_dir=tmp_path)
+    result = second.search("what did we decide about the cache")
+
+    assert "decided to use SQLite for the cache" in result.text
+
+
+def test_shard_centroid_is_seeded_from_persisted_data_on_first_access(tmp_path):
+    # A shard whose SQLiteShardStore already has data from a previous run
+    # must have a real centroid the moment it's touched -- before this
+    # instance ever calls write() -- or routing strategies that check
+    # centroid similarity would skip it as if it were empty.
+    embedder = FakeEmbedder()
+    embedder.register("first memory", [1.0, 0.0, 0.0])
+
+    first = MemoryStore(embedder=embedder, data_dir=tmp_path)
+    first.write("first memory", shard="episodic")
+    del first
+
+    second = MemoryStore(embedder=embedder, data_dir=tmp_path)
+    shard = second._shard("episodic", None)
+
+    assert shard.centroid is not None
+    assert pytest.approx(float((shard.centroid**2).sum()), abs=1e-5) == 1.0

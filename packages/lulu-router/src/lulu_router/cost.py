@@ -1,7 +1,7 @@
 """Cost accounting for memory shards.
 
 The central bet of this router: shards are not interchangeable. A local
-SQLite/TurboVec shard costs ~0 to query; a shard behind an MCP connector to
+SQLite shard costs ~0 to query; a shard behind an MCP connector to
 a remote service costs real latency and real dollars. A flat top-k index
 over a single merged corpus cannot express this distinction, because once
 everything is merged into one index, every result costs the same to fetch.
