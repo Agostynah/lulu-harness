@@ -14,11 +14,24 @@ research corpus needs, not a ~18-memory project memory bank.
 Usage:
     uv run python evals/agent_tasks/run.py
     uv run python evals/agent_tasks/run.py --llm-judge --llm-judge-tasks 8
+    uv run python evals/agent_tasks/run.py --jev-judge   # needs JEV_API_KEY
+    uv run python evals/agent_tasks/run.py --jev-fallback-test
+
+--jev-judge runs the real Jev API against all 25 tasks (not a subsample
+like --llm-judge -- Jev's whole pitch is being cheap/fast enough that it
+doesn't need one; see judges/jev.py). --jev-fallback-test answers a
+different question: does FallbackJudge's safety net actually work at
+eval scale, not just in the mocked unit tests (judges/test_judges.py)?
+It wraps a JevJudge given a deliberately invalid key -- a REAL failed API
+call, not a mock -- in FallbackJudge and asserts the results come out
+byte-for-byte identical to pure GeometricJudge, since that's the only
+way "falls back correctly" is actually true rather than assumed.
 """
 
 from __future__ import annotations
 
 import argparse
+import os
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -26,12 +39,18 @@ import numpy as np
 from lulu_router.backends.memory import InMemoryShardStore
 from lulu_router.cost import Budget, CostProfile
 from lulu_router.judges.claude_cli import ClaudeCLIJudge
+from lulu_router.judges.fallback import FallbackJudge
 from lulu_router.judges.geometric import GeometricJudge
+from lulu_router.judges.jev import JevJudge
 from lulu_router.shard import Shard
 from lulu_router.strategies import STRATEGIES
 
+from lulu.config import load_dotenv
+
 from memories import MEMORIES
 from tasks import TASKS
+
+REPO_ROOT = Path(__file__).parent.parent.parent
 
 CACHE_DIR = Path(__file__).parent / ".cache"
 EMBEDDING_MODEL = "BAAI/bge-small-en-v1.5"
@@ -110,15 +129,37 @@ def run_sweep(
     k: int,
     llm_judge: bool,
     llm_judge_tasks: int,
+    jev_judge: bool,
+    jev_fallback_test: bool,
 ) -> list[StrategyRun]:
     geometric = GeometricJudge()
     claude_cli = ClaudeCLIJudge() if llm_judge else None
+    # Real API, all 25 tasks -- not subsampled like claude_cli. Jev's own
+    # pitch (judges/jev.py: "20-200x faster, 40-1000x cheaper" than a full
+    # LLM call) is exactly what makes that affordable here; subsampling it
+    # the same way would just add noise for no reason.
+    jev = JevJudge(api_key=os.environ["JEV_API_KEY"]) if jev_judge else None
+    # A deliberately invalid key -- a REAL failed API call (401), not a
+    # mock -- wrapped in the actual FallbackJudge production code uses.
+    # Proves the safety net works at eval scale: every one of these rows
+    # should come out identical to the plain "geometric" row for the same
+    # strategy, because that's what "falls back correctly" means in
+    # practice, not just in judges/test_judges.py's mocked unit tests.
+    jev_fallback = (
+        FallbackJudge(primary=JevJudge(api_key="invalid-key-for-fallback-test"), secondary=GeometricJudge())
+        if jev_fallback_test
+        else None
+    )
 
     rows: list[StrategyRun] = []
     for strategy_name, strategy_fn in STRATEGIES.items():
         judges_to_run: list[tuple[str, object, int]] = [("geometric", geometric, len(TASKS))]
         if llm_judge and strategy_name in JUDGE_SENSITIVE_STRATEGIES:
             judges_to_run.append(("claude_cli", claude_cli, min(llm_judge_tasks, len(TASKS))))
+        if jev_judge and strategy_name in JUDGE_SENSITIVE_STRATEGIES:
+            judges_to_run.append(("jev", jev, len(TASKS)))
+        if jev_fallback_test and strategy_name in JUDGE_SENSITIVE_STRATEGIES:
+            judges_to_run.append(("jev_fallback", jev_fallback, len(TASKS)))
 
         for judge_name, judge, n_tasks in judges_to_run:
             hits, reciprocal_ranks, contacted = [], [], []
@@ -159,7 +200,17 @@ def main() -> None:
     parser.add_argument("--top-k", type=int, default=TOP_K)
     parser.add_argument("--llm-judge", action="store_true")
     parser.add_argument("--llm-judge-tasks", type=int, default=8)
+    parser.add_argument("--jev-judge", action="store_true", help="needs JEV_API_KEY (.env or exported)")
+    parser.add_argument(
+        "--jev-fallback-test",
+        action="store_true",
+        help="proves FallbackJudge recovers a real (not mocked) Jev failure -- no key needed",
+    )
     args = parser.parse_args()
+
+    load_dotenv(REPO_ROOT)
+    if args.jev_judge and not os.environ.get("JEV_API_KEY"):
+        parser.error("--jev-judge needs JEV_API_KEY set (in .env or the environment)")
 
     memory_texts = [m.content for m in MEMORIES]
     memory_ids = [m.id for m in MEMORIES]
@@ -173,7 +224,15 @@ def main() -> None:
     shards = build_shards(memory_vec_by_id)
 
     print(f"=== agent_tasks: {len(TASKS)} hand-labeled tasks, {len(MEMORIES)} memories, k={args.top_k} ===\n")
-    rows = run_sweep(shards, task_vec_by_query, k=args.top_k, llm_judge=args.llm_judge, llm_judge_tasks=args.llm_judge_tasks)
+    rows = run_sweep(
+        shards,
+        task_vec_by_query,
+        k=args.top_k,
+        llm_judge=args.llm_judge,
+        llm_judge_tasks=args.llm_judge_tasks,
+        jev_judge=args.jev_judge,
+        jev_fallback_test=args.jev_fallback_test,
+    )
 
     print("\n=== Headline: geometric judge, hit@k by strategy ===")
     for row in rows:
@@ -189,6 +248,34 @@ def main() -> None:
                 f"  {llm_row.strategy:24s} geometric: hit@{args.top_k}={geo_row.hit_at_k:.2f} shards={geo_row.avg_shards_contacted:.1f}  |  "
                 f"llm: hit@{args.top_k}={llm_row.hit_at_k:.2f} shards={llm_row.avg_shards_contacted:.1f}"
             )
+
+    jev_rows = [r for r in rows if r.judge == "jev"]
+    if jev_rows:
+        print(f"\n=== geometric vs. Jev (judge-sensitive strategies, all {len(TASKS)} tasks) ===")
+        for jev_row in jev_rows:
+            geo_row = next(r for r in rows if r.judge == "geometric" and r.strategy == jev_row.strategy)
+            print(
+                f"  {jev_row.strategy:24s} geometric: hit@{args.top_k}={geo_row.hit_at_k:.2f} MRR={geo_row.mrr:.2f} shards={geo_row.avg_shards_contacted:.1f}  |  "
+                f"jev: hit@{args.top_k}={jev_row.hit_at_k:.2f} MRR={jev_row.mrr:.2f} shards={jev_row.avg_shards_contacted:.1f}"
+            )
+
+    fallback_rows = [r for r in rows if r.judge == "jev_fallback"]
+    if fallback_rows:
+        print("\n=== FallbackJudge recovery check (real invalid-key failure, not mocked) ===")
+        all_matched = True
+        for fb_row in fallback_rows:
+            geo_row = next(r for r in rows if r.judge == "geometric" and r.strategy == fb_row.strategy)
+            matched = fb_row.hit_at_k == geo_row.hit_at_k and fb_row.avg_shards_contacted == geo_row.avg_shards_contacted
+            all_matched = all_matched and matched
+            print(
+                f"  {fb_row.strategy:24s} geometric: hit@{args.top_k}={geo_row.hit_at_k:.2f} shards={geo_row.avg_shards_contacted:.1f}  |  "
+                f"jev_fallback: hit@{args.top_k}={fb_row.hit_at_k:.2f} shards={fb_row.avg_shards_contacted:.1f}  "
+                f"[{'MATCH' if matched else 'MISMATCH -- fallback is NOT behaving identically to geometric'}]"
+            )
+        print(
+            f"\n  {'PASS' if all_matched else 'FAIL'}: FallbackJudge under a real Jev failure "
+            f"{'exactly reproduces' if all_matched else 'DOES NOT reproduce'} plain GeometricJudge."
+        )
 
 
 if __name__ == "__main__":
