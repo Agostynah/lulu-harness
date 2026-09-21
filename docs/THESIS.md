@@ -18,7 +18,7 @@ uniform:
 
 | shard | latency | $/query | tokens/result |
 |---|---|---|---|
-| local SQLite/TurboVec (episodic, semantic) | ~5ms | 0 | ~80–150 |
+| local SQLite (episodic, semantic) | ~5ms | 0 | ~80–150 |
 | local code index | ~20ms | 0 | ~600 |
 | MCP connector (remote service) | ~800ms | real | ~300 |
 

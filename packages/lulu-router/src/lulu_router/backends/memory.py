@@ -2,8 +2,8 @@
 
 Backing for tests and the DBpedia eval, where the corpus fits comfortably in
 RAM and what's under test is routing behavior, not storage engineering.
-The harness's production default (TurboVec + SQLite, ported from
-local-memory/core/vector_store.py) lives in backends/turbovec_sqlite.py.
+The harness's production default -- persistent, survives a restart --
+is `backends.sqlite.SQLiteShardStore`.
 """
 
 from __future__ import annotations
@@ -43,6 +43,32 @@ class InMemoryShardStore:
 
     def __len__(self) -> int:
         return len(self.ids)
+
+    def add(self, id: str, content: str, vector: np.ndarray, metadata: dict | None = None) -> None:
+        """O(n) -- rebuilds the whole vector array, since numpy arrays
+        aren't append-friendly. Fine for this backend's actual job (tests,
+        the DBpedia eval's fixed corpus); SQLiteShardStore.add() is the
+        real O(log n) path production code should use instead. Kept as a
+        method (not memory.py reaching into .ids/.contents/.vectors
+        directly, as it used to) so MemoryStore.write() can treat either
+        backend the same way.
+
+        Normalizes `vector` to unit length before storing -- search()'s
+        `self.vectors @ query_vec` is only a real cosine similarity if
+        both sides are unit vectors; memory.py normalizes the query side,
+        this is the store side of that same contract (matches
+        from_vectors()'s per-row normalization, just one row at a time)."""
+        vec = np.asarray(vector, dtype=np.float32).reshape(1, -1)
+        norm = np.linalg.norm(vec)
+        if norm > 1e-9:
+            vec = vec / norm
+        self.ids.append(id)
+        self.contents.append(content)
+        self.metadata.append(metadata or {})
+        self.vectors = vec if self.vectors is None else np.vstack([self.vectors, vec])
+
+    def centroid(self) -> np.ndarray | None:
+        return self.vectors.mean(axis=0) if self.vectors is not None and len(self.ids) > 0 else None
 
     @classmethod
     def from_vectors(
