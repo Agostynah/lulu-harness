@@ -183,7 +183,7 @@ def main(
     history = session.load_history()
 
     model = model_override or build_model_client(config)
-    memory = memory_override or MemoryStore()
+    memory = memory_override or MemoryStore(data_dir=root / ".lulu" / "data")
     tools = build_tool_registry(root, locks_dir=locks_dir, session_id=session.session_id)
     permissions = PermissionChecker(
         mode=mode,

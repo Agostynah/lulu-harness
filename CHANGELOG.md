@@ -12,6 +12,15 @@ libraries).
 
 ## [Unreleased]
 
+### Added
+
+- `SQLiteShardStore`: `MemoryStore`'s memory now survives a restart —
+  one SQLite file per (shard type, scope) under `.lulu/data/`, `add()`
+  is a real `INSERT` instead of rebuilding the whole in-memory array per
+  write, and a shard's existing data is discovered on first search even
+  if nothing wrote to it yet this session. In-memory (tests, evals)
+  behavior is unchanged (`data_dir=None`).
+
 ## [0.2.0] - 2026-09-21
 
 ### Added

@@ -151,7 +151,10 @@ class LuluServer:
         self.mode = mode or DEFAULT_SERVER_MODE
         self.log_dir = root / ".lulu" / "logs"
         self.locks_dir = root / ".lulu" / "locks"
-        self.memory = memory_override or MemoryStore()
+        # .lulu/data/ -- already anticipated in .gitignore's `**/data/*.db`
+        # pattern from before this backend existed. Persists across
+        # restarts; memory_override (tests) bypasses this entirely.
+        self.memory = memory_override or MemoryStore(data_dir=root / ".lulu" / "data")
         self._model_override = model_override
         self._sessions: dict[str, SessionEntry] = {}
 

@@ -30,9 +30,9 @@ class ShardStore(Protocol):
     """What a shard's storage backend must provide.
 
     Implementations: `backends.memory.InMemoryShardStore` (brute-force,
-    used for tests and the DBpedia eval), a TurboVec+SQLite backend (the
-    harness's local default, ported from local-memory/core/vector_store.py),
-    and an MCP connector backend (the harness's `remote` shard).
+    used for tests and the DBpedia eval), `backends.sqlite.SQLiteShardStore`
+    (persistent, the harness's local default), and an MCP connector
+    backend (the harness's `remote` shard).
 
     `search` takes both the query vector AND the original query text.
     Local vector backends only need the vector; a remote MCP-backed shard
