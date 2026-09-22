@@ -386,4 +386,143 @@ MEMORIES: list[Memory] = [
         "Bought travel insurance for the Japan trip and ended up actually using it for a lost-luggage claim.",
     ),
     Memory("epi-49", "episodic", "Bought a bulk pack of contact lenses during a sale."),
+    # ============================================================
+    # Wave 2 -- added to increase statistical power specifically for the
+    # geometric-vs-Jev comparison (see evals/agent_tasks/METHODOLOGY.md):
+    # the first 143-memory/126-task set only produced 3 discordant task
+    # pairs between geometric and Jev, nowhere near enough for an exact
+    # McNemar test to reach significance. More topic clusters, more
+    # near-duplicate distractor pairs, same authoring discipline as wave 1.
+    # ============================================================
+    # --- semantic: extended family & friends (more distractor pairs) ---
+    Memory("sem-51", "semantic", "Has one older brother, no sisters."),
+    Memory("sem-52", "semantic", "Older brother lives in Seattle."),
+    Memory("sem-53", "semantic", "Cousin on mom's side is a nurse."),
+    Memory("sem-54", "semantic", "Cousin on dad's side is a teacher."),
+    Memory("sem-55", "semantic", "Grandmother's birthday is April 2nd."),
+    Memory("sem-56", "semantic", "Grandfather passed away in 2020."),
+    Memory("sem-57", "semantic", "Childhood best friend now lives in Austin."),
+    Memory("sem-58", "semantic", "College roommate now lives in Denver."),
+    Memory("sem-59", "semantic", "Niece (brother's kid) just turned 5."),
+    Memory("sem-60", "semantic", "Nephew (sister's kid, the one with the tree-nut allergy) just turned 8."),
+    # --- semantic: tech & gadgets ---
+    Memory("sem-61", "semantic", "Laptop is a 14-inch MacBook Pro with the M3 chip."),
+    Memory("sem-62", "semantic", "Phone is a Google Pixel, not an iPhone."),
+    Memory("sem-63", "semantic", "Laptop warranty runs through 2027."),
+    Memory("sem-64", "semantic", "Phone's extended warranty expired last year."),
+    Memory("sem-65", "semantic", "Prefers noise-cancelling over-ear headphones over earbuds."),
+    Memory("sem-66", "semantic", "Home office monitor setup is a single 32-inch 4K display."),
+    # --- semantic: insurance & bills ---
+    Memory("sem-67", "semantic", "Health insurance plan is a high-deductible PPO."),
+    Memory("sem-68", "semantic", "Auto insurance and renters insurance are with two different companies."),
+    Memory("sem-69", "semantic", "Renters insurance deductible is $500."),
+    Memory("sem-70", "semantic", "Electric bill is on a fixed-amount budget billing plan."),
+    Memory("sem-71", "semantic", "Water is included in rent; electricity is billed separately."),
+    # --- semantic: food ---
+    Memory("sem-72", "semantic", "Favorite cuisine to cook at home is Thai."),
+    Memory("sem-73", "semantic", "Favorite cuisine to order delivery is Indian."),
+    Memory("sem-74", "semantic", "Allergic to peanuts specifically -- other tree nuts are fine."),
+    Memory("sem-75", "semantic", "Coffee order when out: oat milk cortado (different from the pour-over made at home)."),
+    # --- semantic: more hobbies ---
+    Memory("sem-76", "semantic", "Also plays chess casually online, rating around 1200."),
+    Memory("sem-77", "semantic", "Took up film photography, shoots on a 35mm camera."),
+    Memory("sem-78", "semantic", "Prefers board games over video games when friends are around."),
+    Memory("sem-79", "semantic", "Plays video games solo, mostly strategy games."),
+    # --- semantic: home renovation plans ---
+    Memory("sem-80", "semantic", "Planning to repaint the living room next spring."),
+    Memory("sem-81", "semantic", "Already repainted the bedroom last fall."),
+    Memory("sem-82", "semantic", "Wants to replace the kitchen countertops eventually."),
+    Memory("sem-83", "semantic", "The bathroom was renovated by the previous tenant -- no plans to change it."),
+    # --- semantic: work projects ---
+    Memory("sem-84", "semantic", "Currently leading the migration off the legacy billing system."),
+    Memory("sem-85", "semantic", "Previously led the search infrastructure rewrite."),
+    Memory("sem-86", "semantic", "Mentoring two junior engineers this quarter."),
+    Memory("sem-87", "semantic", "On-call rotation is one week every six weeks."),
+    # --- semantic: more travel ---
+    Memory("sem-88", "semantic", "Favorite trip so far was Japan in 2025."),
+    Memory("sem-89", "semantic", "Least favorite trip was a rainy week in London."),
+    Memory("sem-90", "semantic", "Bucket list destination is New Zealand."),
+    # --- procedural: wave 2 ---
+    Memory(
+        "proc-45",
+        "procedural",
+        "To reset the smart thermostat: hold the button 5 seconds, reconfigure via the Google Home app.",
+    ),
+    Memory(
+        "proc-46",
+        "procedural",
+        "To reset the smart doorbell camera: separate app, hold the button on the back for 15 seconds.",
+    ),
+    Memory("proc-47", "procedural", "Chess practice: 15 minutes of puzzles every morning, before Spanish practice."),
+    Memory(
+        "proc-48",
+        "procedural",
+        "Film photography routine: shoot a roll every other weekend, develop it at the lab downtown.",
+    ),
+    Memory("proc-49", "procedural", "Board game night is hosted every other Friday, rotating who picks the game."),
+    Memory(
+        "proc-50",
+        "procedural",
+        "To file a renters insurance claim: photos first, then call the 1-800 number within 48 hours.",
+    ),
+    Memory(
+        "proc-51",
+        "procedural",
+        "To file an auto insurance claim (different company from renters): it's app-based, dashcam footage required.",
+    ),
+    Memory(
+        "proc-52",
+        "procedural",
+        "To switch the electric budget-billing plan, call in September before the annual true-up.",
+    ),
+    Memory(
+        "proc-53",
+        "procedural",
+        "After a laptop repair, register the new serial number on the vendor site to update the warranty.",
+    ),
+    Memory("proc-54", "procedural", "On-call handoff routine: post a summary in #oncall-handoff before the rotation ends."),
+    Memory("proc-55", "procedural", "Mentoring routine: a 30-minute 1:1 with each junior engineer every Thursday."),
+    Memory("proc-56", "procedural", "Migration status update is a weekly doc, due Monday mornings."),
+    Memory("proc-57", "procedural", "Kitchen countertop quotes are saved in a folder, revisited quarterly."),
+    Memory("proc-58", "procedural", "To book the guest room at the Austin friend's place, text about a week ahead."),
+    Memory(
+        "proc-59",
+        "procedural",
+        "To reach the college roommate in Denver, text first -- they don't answer calls from unknown hours.",
+    ),
+    Memory("proc-60", "procedural", "Grandmother's birthday call happens the morning of, not the evening."),
+    Memory("proc-61", "procedural", "The niece's gift ideas get logged in the notes app after every visit."),
+    Memory("proc-62", "procedural", "Headphone care: wipe the ear cushions weekly, recharge every Sunday."),
+    Memory("proc-63", "procedural", "Monitor color profile gets recalibrated every few months for photo editing."),
+    Memory(
+        "proc-64",
+        "procedural",
+        "Film photography scans back up to a separate external drive, not the phone-photo cloud backup.",
+    ),
+    Memory("proc-65", "procedural", "Thai cooking-night groceries are a separate recurring list from the regular grocery order."),
+    # --- episodic: wave 2 ---
+    Memory("epi-50", "episodic", "The MacBook Pro's battery was replaced under warranty last year."),
+    Memory("epi-51", "episodic", "The Pixel phone screen cracked and was repaired at a third-party shop."),
+    Memory("epi-52", "episodic", "Filed a renters insurance claim after a water leak damaged a rug."),
+    Memory("epi-53", "episodic", "Filed an auto insurance claim after a minor parking-lot dent."),
+    Memory("epi-54", "episodic", "The legacy billing migration hit a currency-rounding snag, fixed before launch."),
+    Memory("epi-55", "episodic", "The search infrastructure rewrite shipped two weeks early."),
+    Memory("epi-56", "episodic", "Lost a casual chess game to a coworker at lunch -- first loss in weeks."),
+    Memory("epi-57", "episodic", "The grandmother's birthday call ran long this year and caused a missed meeting."),
+    Memory("epi-58", "episodic", "Visited the childhood best friend in Austin over a long weekend."),
+    Memory("epi-59", "episodic", "The college roommate visited for a wedding last year and stayed the whole week."),
+    Memory(
+        "epi-60",
+        "episodic",
+        "Repainted the bedroom a different color than originally planned after a sample didn't match.",
+    ),
+    Memory("epi-61", "episodic", "The rainy London trip did have one good day -- a free walking tour."),
+    Memory(
+        "epi-62",
+        "episodic",
+        "Inheriting the grandfather's old camera after he passed in 2020 is what started the film photography hobby.",
+    ),
+    Memory("epi-63", "episodic", "Someone spilled wine on a rare board game at game night -- had to replace it."),
+    Memory("epi-64", "episodic", "Went 0-1 in the local chess club's first tournament, learned a lot anyway."),
+    Memory("epi-65", "episodic", "The Japan trip's best day was climbing Mt. Fuji at sunrise."),
 ]
