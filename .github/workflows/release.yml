@@ -77,7 +77,7 @@ jobs:
             apps/inspector/src-tauri/binaries/lulu-server-${{ matrix.target_triple }}${{ matrix.sidecar_ext }}
 
       - name: Build and publish
-        uses: tauri-apps/tauri-action@v0
+        uses: tauri-apps/tauri-action@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           # linuxdeploy's bundled `strip` doesn't understand the .relr.dyn
